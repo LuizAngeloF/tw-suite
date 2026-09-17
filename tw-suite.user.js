@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.7.0
+// @version      0.8.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1375,6 +1375,368 @@
       }
 
       log.info('Agendador de Comandos carregado.');
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: auto-recrutamento (Fase 3)
+//
+// Recruta tropas automaticamente na tela de treinamento
+// (screen=train). Preenche os campos de quantidade e clica
+// no botão de treinar. Loop contínuo enquanto ativo.
+// ============================================================
+(function registerAutoRecruitModule() {
+  'use strict';
+
+  const MODULE_ID = 'auto-recruit';
+  const PANEL_ID = 'twsuite-recruit-panel';
+
+  const UNIT_FIELDS = ['spear', 'sword', 'axe', 'archer', 'spy', 'light', 'marcher', 'heavy', 'ram', 'catapult', 'knight', 'snob'];
+  const UNIT_LABELS = {
+    spear: 'Lanceiro', sword: 'Espadachim', axe: 'Bárbaro', archer: 'Arqueiro',
+    spy: 'Explorador', light: 'Cavalaria leve', marcher: 'Arqueiro a cavalo',
+    heavy: 'Cavalaria pesada', ram: 'Aríete', catapult: 'Catapulta', knight: 'Paladino', snob: 'Nobre',
+  };
+
+  const DEFAULT_SETTINGS = {
+    enabled: false,
+    unit: 'light',
+    amount: 10,
+    interval: 5000, // ms entre recrutas
+    dryRun: true,
+  };
+
+  async function recruit(unit, amount, log) {
+    // Procura pelos campos de entrada e botão de treinar
+    const unitInput = document.querySelector(`input[name="${unit}"]`) || document.querySelector(`#${unit}`);
+    const trainBtn = document.querySelector('button[name="train"]') || document.querySelector('input[type="submit"][value*="Treinar"]');
+
+    if (!unitInput || !trainBtn) {
+      return { ok: false, reason: 'Campos de treinamento não encontrados' };
+    }
+
+    unitInput.value = String(amount);
+    unitInput.dispatchEvent(new Event('input', { bubbles: true }));
+    unitInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    trainBtn.click();
+    return { ok: true };
+  }
+
+  window.TWSuite.registerModule({
+    id: MODULE_ID,
+    name: 'Auto Recrutamento',
+    screens: ['train'],
+    defaultEnabled: false,
+
+    async run(ctx) {
+      const { storage, log } = ctx;
+      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+
+      if (!settings.enabled) return;
+
+      const panel = document.createElement('div');
+      panel.id = PANEL_ID;
+      Object.assign(panel.style, {
+        position: 'fixed', top: '60px', left: '16px', width: '280px',
+        background: '#f4e4bc', border: '2px solid #7a5230', borderRadius: '6px',
+        padding: '10px', zIndex: 99998, fontSize: '11px', color: '#1a1a1a',
+        fontFamily: 'Verdana, Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+      });
+
+      const title = document.createElement('div');
+      title.style.fontWeight = 'bold';
+      title.style.marginBottom = '6px';
+      title.textContent = 'Auto Recrutamento';
+      panel.appendChild(title);
+
+      const unitSelect = document.createElement('select');
+      for (const u of UNIT_FIELDS) {
+        const opt = document.createElement('option');
+        opt.value = u;
+        opt.textContent = UNIT_LABELS[u];
+        if (u === settings.unit) opt.selected = true;
+        unitSelect.appendChild(opt);
+      }
+      unitSelect.addEventListener('change', async () => {
+        settings.unit = unitSelect.value;
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+
+      const amountInput = document.createElement('input');
+      amountInput.type = 'number';
+      amountInput.min = '1';
+      amountInput.value = String(settings.amount);
+      amountInput.style.width = '60px';
+      amountInput.addEventListener('change', async () => {
+        settings.amount = Math.max(1, Number(amountInput.value) || 1);
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+
+      const dryRunCb = document.createElement('input');
+      dryRunCb.type = 'checkbox';
+      dryRunCb.checked = settings.dryRun;
+      dryRunCb.addEventListener('change', async () => {
+        settings.dryRun = dryRunCb.checked;
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+
+      panel.appendChild(document.createTextNode('Tropa: '));
+      panel.appendChild(unitSelect);
+      panel.appendChild(document.createElement('br'));
+      panel.appendChild(document.createTextNode('Qtd: '));
+      panel.appendChild(amountInput);
+      panel.appendChild(document.createElement('br'));
+      panel.appendChild(dryRunCb);
+      panel.appendChild(document.createTextNode(' Modo teste'));
+
+      document.body.appendChild(panel);
+
+      // Loop de recrutamento
+      const recruitLoop = setInterval(async () => {
+        if (settings.dryRun) {
+          log.info(`(teste) recrutaria ${settings.amount} ${UNIT_LABELS[settings.unit]}`);
+          return;
+        }
+
+        const result = await recruit(settings.unit, settings.amount, log);
+        if (!result.ok) {
+          log.warn('Falha ao recrutar:', result.reason);
+        } else {
+          log.info(`Recrutado: ${settings.amount} ${UNIT_LABELS[settings.unit]}`);
+        }
+      }, settings.interval);
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: coleta-automática (Fase 3)
+//
+// Coleta/desbloqueia automaticamente na tela de saque
+// (scavenge). Encontra e clica nos botões de coleta.
+// ============================================================
+(function registerAutoCollectModule() {
+  'use strict';
+
+  const MODULE_ID = 'auto-collect';
+  const PANEL_ID = 'twsuite-collect-panel';
+
+  const DEFAULT_SETTINGS = {
+    enabled: false,
+    interval: 3000,
+    dryRun: true,
+  };
+
+  function findCollectButtons() {
+    // Procura por botões de coleta (variações possíveis)
+    const buttons = [];
+    document.querySelectorAll('button, input[type="submit"]').forEach((btn) => {
+      const text = (btn.textContent || btn.value || '').toLowerCase();
+      if (text.includes('coleta') || text.includes('desbloque') || text.includes('collect') || text.includes('loot')) {
+        buttons.push(btn);
+      }
+    });
+    return buttons;
+  }
+
+  window.TWSuite.registerModule({
+    id: MODULE_ID,
+    name: 'Coleta Automática',
+    screens: ['scavenge'],
+    defaultEnabled: false,
+
+    async run(ctx) {
+      const { storage, log } = ctx;
+      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+
+      if (!settings.enabled) return;
+
+      const panel = document.createElement('div');
+      panel.id = PANEL_ID;
+      Object.assign(panel.style, {
+        position: 'fixed', top: '60px', left: '16px', width: '260px',
+        background: '#f4e4bc', border: '2px solid #7a5230', borderRadius: '6px',
+        padding: '10px', zIndex: 99998, fontSize: '11px', color: '#1a1a1a',
+        fontFamily: 'Verdana, Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+      });
+
+      const title = document.createElement('div');
+      title.style.fontWeight = 'bold';
+      title.style.marginBottom = '6px';
+      title.textContent = 'Coleta Automática';
+      panel.appendChild(title);
+
+      const statusEl = document.createElement('div');
+      statusEl.style.fontSize = '10px';
+      statusEl.style.marginBottom = '4px';
+      statusEl.textContent = settings.dryRun ? '(modo teste)' : '(coletando...)';
+      panel.appendChild(statusEl);
+
+      const dryRunCb = document.createElement('input');
+      dryRunCb.type = 'checkbox';
+      dryRunCb.checked = settings.dryRun;
+      dryRunCb.addEventListener('change', async () => {
+        settings.dryRun = dryRunCb.checked;
+        statusEl.textContent = settings.dryRun ? '(modo teste)' : '(coletando...)';
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+
+      panel.appendChild(dryRunCb);
+      panel.appendChild(document.createTextNode(' Modo teste'));
+
+      document.body.appendChild(panel);
+
+      // Loop de coleta
+      const collectLoop = setInterval(() => {
+        const buttons = findCollectButtons();
+        if (buttons.length === 0) return;
+
+        for (const btn of buttons) {
+          if (settings.dryRun) {
+            log.info('(teste) clicaria em botão de coleta');
+          } else {
+            log.info('Coletando...');
+            btn.click();
+          }
+        }
+      }, settings.interval);
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: notificações-discord (Fase 4)
+//
+// Envia notificações via webhook do Discord pra eventos
+// do jogo: ataque chegando, defesa ativada, etc.
+// ============================================================
+(function registerDiscordNotifModule() {
+  'use strict';
+
+  const MODULE_ID = 'notif-discord';
+  const PANEL_ID = 'twsuite-notif-panel';
+
+  const DEFAULT_SETTINGS = {
+    webhookUrl: '',
+    enableAttackAlert: true,
+    enableDefenseAlert: true,
+    dryRun: false,
+  };
+
+  async function sendDiscordNotif(webhookUrl, message, log) {
+    if (!webhookUrl) {
+      log.warn('Webhook URL do Discord não configurado.');
+      return { ok: false };
+    }
+
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: message,
+          username: 'TW Suite Bot',
+          avatar_url: 'https://www.tribalwars.com.br/favicon.ico',
+        }),
+      });
+      return { ok: response.ok };
+    } catch (e) {
+      log.error('Erro ao enviar notificação Discord:', e.message);
+      return { ok: false };
+    }
+  }
+
+  window.TWSuite.registerModule({
+    id: MODULE_ID,
+    name: 'Notificações Discord',
+    screens: ['any'],
+    defaultEnabled: false,
+
+    async run(ctx) {
+      const { storage, log } = ctx;
+      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+
+      const panel = document.createElement('div');
+      panel.id = PANEL_ID;
+      Object.assign(panel.style, {
+        position: 'fixed', top: '60px', left: '16px', width: '300px',
+        background: '#f4e4bc', border: '2px solid #7a5230', borderRadius: '6px',
+        padding: '10px', zIndex: 99998, fontSize: '11px', color: '#1a1a1a',
+        fontFamily: 'Verdana, Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+      });
+
+      const title = document.createElement('div');
+      title.style.fontWeight = 'bold';
+      title.style.marginBottom = '6px';
+      title.textContent = 'Notificações Discord';
+      panel.appendChild(title);
+
+      const webhookInput = document.createElement('textarea');
+      webhookInput.placeholder = 'Cole o webhook URL do Discord';
+      webhookInput.value = settings.webhookUrl;
+      webhookInput.style.width = '100%';
+      webhookInput.style.height = '60px';
+      webhookInput.style.marginBottom = '4px';
+      webhookInput.style.boxSizing = 'border-box';
+      webhookInput.style.fontSize = '10px';
+      webhookInput.addEventListener('change', async () => {
+        settings.webhookUrl = webhookInput.value.trim();
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+      panel.appendChild(webhookInput);
+
+      const testBtn = document.createElement('button');
+      testBtn.textContent = 'Testar';
+      testBtn.style.fontSize = '10px';
+      testBtn.style.width = '100%';
+      testBtn.addEventListener('click', async () => {
+        const result = await sendDiscordNotif(settings.webhookUrl, '🧪 Teste de notificação do TW Suite', log);
+        if (result.ok) {
+          log.info('Notificação de teste enviada com sucesso!');
+          testBtn.textContent = 'Enviado!';
+          setTimeout(() => { testBtn.textContent = 'Testar'; }, 2000);
+        } else {
+          log.error('Falha ao enviar notificação de teste.');
+        }
+      });
+      panel.appendChild(testBtn);
+
+      const attackCb = document.createElement('input');
+      attackCb.type = 'checkbox';
+      attackCb.checked = settings.enableAttackAlert;
+      attackCb.addEventListener('change', async () => {
+        settings.enableAttackAlert = attackCb.checked;
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+      panel.appendChild(document.createElement('br'));
+      panel.appendChild(attackCb);
+      panel.appendChild(document.createTextNode(' Alertar ataque'));
+
+      const defenseCb = document.createElement('input');
+      defenseCb.type = 'checkbox';
+      defenseCb.checked = settings.enableDefenseAlert;
+      defenseCb.addEventListener('change', async () => {
+        settings.enableDefenseAlert = defenseCb.checked;
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+      panel.appendChild(document.createElement('br'));
+      panel.appendChild(defenseCb);
+      panel.appendChild(document.createTextNode(' Alertar defesa'));
+
+      document.body.appendChild(panel);
+
+      // Monitorar ataques (simplificado — procura por ícone de ataque na página)
+      const monitor = setInterval(async () => {
+        // Procura por indicador de ataque no ícone/título da página
+        if (settings.enableAttackAlert && document.title.includes('!')) {
+          log.info('Ataque detectado! Enviando notificação...');
+          await sendDiscordNotif(settings.webhookUrl, '⚠️ ATAQUE DETECTADO! Confira sua aldeia agora.', log);
+        }
+      }, 5000);
+
+      log.info('Notificações Discord carregadas.');
     },
   });
 })();
