@@ -1,549 +1,2437 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TW Suite Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TW Suite · Sala de Guerra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400;1,9..144,500&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink-0: #0b0a09;
+  --ink-1: #12110f;
+  --ink-2: #1a1815;
+  --ink-3: #24211d;
+  --ink-4: #2f2b26;
+  --line: rgba(236, 220, 190, 0.07);
+  --line-2: rgba(236, 220, 190, 0.13);
+  --line-3: rgba(236, 220, 190, 0.22);
+  --text: #efe7d8;
+  --text-2: #b8ae9c;
+  --text-3: #7f7668;
+  --ember: #e9a54b;
+  --ember-2: #d8712d;
+  --ember-soft: rgba(233, 165, 75, 0.12);
+  --ember-glow: rgba(233, 165, 75, 0.38);
+  --jade: #6cc4a6;
+  --jade-soft: rgba(108, 196, 166, 0.12);
+  --rose: #e46a5c;
+  --rose-soft: rgba(228, 106, 92, 0.12);
+  --serif: 'Fraunces', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --sans: 'Manrope', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.7), 0 2px 0 rgba(255, 240, 210, 0.02) inset;
+  color-scheme: dark;
+}
 
-        body {
-            font-family: 'Verdana', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  background: var(--ink-0);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 520px at 12% -8%, rgba(233, 165, 75, 0.10), transparent 60%),
+    radial-gradient(700px 500px at 100% 110%, rgba(108, 196, 166, 0.05), transparent 60%),
+    repeating-linear-gradient(0deg, transparent 0 47px, rgba(236, 220, 190, 0.028) 47px 48px),
+    repeating-linear-gradient(90deg, transparent 0 47px, rgba(236, 220, 190, 0.028) 47px 48px);
+  z-index: 0;
+}
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.55));
+  z-index: 0;
+}
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+input, textarea { font: inherit; color: inherit; }
+::selection { background: var(--ember-glow); color: #fff; }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; border-radius: 6px; }
+svg { display: block; }
+.ico { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ico.sm { width: 15px; height: 15px; }
+.ico.lg { width: 22px; height: 22px; }
+.mono { font-family: var(--mono); font-feature-settings: 'zero' 1; }
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-            overflow: hidden;
-        }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--ink-4); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
 
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
-        }
+/* ---------- App shell ---------- */
+.app {
+  position: relative;
+  z-index: 1;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
 
-        .header h1 {
-            font-size: 32px;
-            margin-bottom: 10px;
-        }
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(to bottom, rgba(11, 10, 9, 0.9), rgba(11, 10, 9, 0.6));
+  backdrop-filter: blur(14px);
+}
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand-mark { width: 34px; height: 34px; }
+.brand-name { font-family: var(--serif); font-size: 19px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+.brand-name em { font-style: italic; font-weight: 400; color: var(--ember); }
+.brand-sub { font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; }
 
-        .header p {
-            font-size: 14px;
-            opacity: 0.9;
-        }
+.cmdk {
+  flex: 1;
+  max-width: 460px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 11px;
+  background: rgba(26, 24, 21, 0.6);
+  color: var(--text-3);
+  text-align: left;
+  transition: border-color .2s, background .2s;
+}
+.cmdk:hover { border-color: var(--line-3); background: var(--ink-2); color: var(--text-2); }
+.cmdk span { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+kbd {
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  color: var(--text-2);
+  background: var(--ink-1);
+}
 
-        .content {
-            display: flex;
-            min-height: calc(100vh - 200px);
-        }
+.sync-pill {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.sync-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); position: relative; }
+.sync-pill.on .sync-dot { background: var(--jade); }
+.sync-pill.on .sync-dot::after {
+  content: ''; position: absolute; inset: -4px; border-radius: 50%;
+  border: 1px solid var(--jade); animation: ping 2.2s cubic-bezier(0, 0, .2, 1) infinite;
+}
+.sync-pill.saving .sync-dot { background: var(--ember); }
+@keyframes ping { 0% { transform: scale(.6); opacity: 1; } 100% { transform: scale(2.2); opacity: 0; } }
 
-        .sidebar {
-            width: 250px;
-            background: #f8f9fa;
-            border-right: 1px solid #ddd;
-            padding: 20px;
-            overflow-y: auto;
-        }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 36px; padding: 0 12px; border-radius: 10px;
+  border: 1px solid var(--line-2); color: var(--text-2);
+  transition: all .2s; white-space: nowrap;
+}
+.icon-btn:hover { color: var(--text); border-color: var(--line-3); background: var(--ink-2); }
 
-        .sidebar h3 {
-            font-size: 12px;
-            text-transform: uppercase;
-            color: #666;
-            margin: 20px 0 10px 0;
-            font-weight: bold;
-        }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 40px; padding: 0 16px; border-radius: 11px;
+  font-weight: 600; font-size: 13.5px; white-space: nowrap;
+  transition: transform .15s, box-shadow .2s, background .2s, border-color .2s, color .2s;
+}
+.btn:active { transform: translateY(1px); }
+.btn-ember {
+  color: #1b1208;
+  background: linear-gradient(180deg, #f2b560, var(--ember) 45%, var(--ember-2));
+  box-shadow: 0 0 0 1px rgba(255, 210, 150, 0.35) inset, 0 10px 30px -10px var(--ember-glow);
+}
+.btn-ember:hover { box-shadow: 0 0 0 1px rgba(255, 220, 170, 0.5) inset, 0 14px 36px -10px var(--ember-glow); }
+.btn-ghost { border: 1px solid var(--line-2); color: var(--text); background: rgba(26, 24, 21, 0.5); }
+.btn-ghost:hover { border-color: var(--line-3); background: var(--ink-2); }
+.btn-danger { border: 1px solid rgba(228, 106, 92, 0.35); color: var(--rose); }
+.btn-danger:hover { background: var(--rose-soft); }
+.btn-sm { height: 32px; padding: 0 11px; font-size: 12.5px; border-radius: 9px; }
 
-        .sidebar .account-selector {
-            margin-bottom: 20px;
-        }
+.layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 320px;
+}
 
-        .sidebar input {
-            width: 100%;
-            padding: 8px;
-            margin: 5px 0;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 12px;
-        }
+/* ---------- Rail (fleet) ---------- */
+.rail {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--line);
+  background: rgba(18, 17, 15, 0.55);
+}
+.rail-head { padding: 20px 18px 12px; }
+.eyebrow { font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-3); font-weight: 600; }
+.rail-title { display: flex; align-items: baseline; justify-content: space-between; margin-top: 4px; }
+.rail-title h2 { font-family: var(--serif); font-weight: 400; font-size: 26px; letter-spacing: -0.01em; }
+.rail-title .count { font-family: var(--mono); color: var(--text-3); font-size: 12px; }
+.rail-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.search {
+  margin-top: 12px; display: flex; align-items: center; gap: 8px;
+  padding: 0 10px; height: 36px; border-radius: 10px;
+  border: 1px solid var(--line-2); background: var(--ink-1); color: var(--text-3);
+}
+.search input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--text); font-size: 13px; }
+.chips { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.chip {
+  padding: 4px 10px; border-radius: 999px; font-size: 12px; color: var(--text-3);
+  border: 1px solid var(--line); transition: all .2s;
+}
+.chip:hover { color: var(--text-2); border-color: var(--line-2); }
+.chip.on { color: var(--ember); border-color: rgba(233, 165, 75, 0.4); background: var(--ember-soft); }
 
-        .sidebar button {
-            width: 100%;
-            padding: 8px;
-            margin: 5px 0;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: bold;
-        }
+.rail-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 10px 90px; display: flex; flex-direction: column; gap: 6px; }
+.acct {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background .2s, border-color .2s;
+  outline: none;
+}
+.acct:hover { background: rgba(36, 33, 29, 0.55); }
+.acct:focus-visible { border-color: var(--ember); }
+.acct.active {
+  background: linear-gradient(90deg, rgba(233, 165, 75, 0.10), rgba(36, 33, 29, 0.4));
+  border-color: rgba(233, 165, 75, 0.28);
+}
+.acct.active::before {
+  content: ''; position: absolute; left: -10px; top: 14px; bottom: 14px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--ember); box-shadow: 0 0 14px var(--ember-glow);
+}
+.seal {
+  display: grid; place-items: center; width: 44px; height: 44px; border-radius: 11px;
+  border: 1px solid var(--line-2);
+  background: radial-gradient(circle at 30% 20%, rgba(233, 165, 75, 0.16), transparent 70%), var(--ink-2);
+  font-family: var(--mono); line-height: 1; text-align: center; position: relative;
+}
+.seal small { display: block; font-size: 9px; letter-spacing: .12em; color: var(--text-3); text-transform: uppercase; }
+.seal b { display: block; font-size: 14px; font-weight: 600; color: var(--ember); margin-top: 3px; }
+.seal .check {
+  position: absolute; inset: -1px; border-radius: 11px; display: none; place-items: center;
+  background: var(--ember); color: #1b1208;
+}
+.acct.checked .seal .check { display: grid; }
+.acct-body { min-width: 0; }
+.acct-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acct-meta { font-size: 11.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acct-dots { display: flex; gap: 3px; margin-top: 6px; }
+.acct-dots i { width: 14px; height: 3px; border-radius: 3px; background: var(--ink-4); }
+.acct-dots i.on { background: var(--ember); box-shadow: 0 0 6px var(--ember-glow); }
+.acct-dots i.on.test { background: repeating-linear-gradient(90deg, var(--ember) 0 3px, transparent 3px 5px); box-shadow: none; }
+.tag {
+  font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; font-weight: 700;
+  padding: 3px 7px; border-radius: 6px; white-space: nowrap;
+}
+.tag-test { color: var(--ember); background: var(--ember-soft); }
+.tag-live { color: var(--jade); background: var(--jade-soft); }
+.tag-off { color: var(--text-3); background: var(--ink-3); }
 
-        .sidebar button:hover {
-            background: #764ba2;
-        }
+.rail-empty { padding: 30px 14px; text-align: center; color: var(--text-3); font-size: 13px; }
 
-        .module-list {
-            list-style: none;
-        }
+/* ---------- Main ---------- */
+.main { min-height: 0; overflow-y: auto; padding: 30px clamp(18px, 3vw, 42px) 120px; }
 
-        .module-item {
-            padding: 10px;
-            margin: 5px 0;
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
+.hero { position: relative; padding-bottom: 26px; border-bottom: 1px solid var(--line); }
+.hero-kicker { display: flex; align-items: center; gap: 10px; color: var(--text-3); font-size: 12px; }
+.hero-kicker .world { font-family: var(--mono); color: var(--ember); letter-spacing: .08em; }
+.hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-top: 6px; }
+.hero-title {
+  font-family: var(--serif); font-weight: 400; letter-spacing: -0.025em;
+  font-size: clamp(38px, 5vw, 64px); line-height: 1; word-break: break-word;
+}
+.hero-title em { font-style: italic; color: var(--ember); }
+.hero-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
-        .module-item:hover {
-            background: #e8e9ff;
-            border-color: #667eea;
-        }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin-top: 26px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.stat { background: rgba(18, 17, 15, 0.92); padding: 16px 18px; min-width: 0; }
+.stat .k { font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; color: var(--text-3); font-weight: 600; }
+.stat .v { font-family: var(--mono); font-size: 26px; font-weight: 500; margin-top: 6px; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat .v small { font-size: 14px; color: var(--text-3); }
+.stat .h { font-size: 11.5px; color: var(--text-3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meter { height: 4px; background: var(--ink-3); border-radius: 4px; margin-top: 10px; overflow: hidden; }
+.meter i { display: block; height: 100%; background: linear-gradient(90deg, var(--ember-2), var(--ember)); border-radius: 4px; transition: width .4s; }
 
-        .module-item.active {
-            background: #667eea;
-            color: white;
-            border-color: #667eea;
-        }
+.testband {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  margin-top: 18px; padding: 14px 16px; border-radius: var(--radius);
+  border: 1px solid rgba(233, 165, 75, 0.25);
+  background:
+    repeating-linear-gradient(-45deg, rgba(233, 165, 75, 0.05) 0 10px, transparent 10px 20px),
+    rgba(26, 24, 21, 0.7);
+}
+.testband.live { border-color: rgba(108, 196, 166, 0.25); background: rgba(108, 196, 166, 0.05); }
+.testband-text { flex: 1; min-width: 220px; }
+.testband-text b { display: block; font-weight: 600; }
+.testband-text span { font-size: 12.5px; color: var(--text-2); }
 
-        .main-content {
-            flex: 1;
-            padding: 30px;
-            overflow-y: auto;
-        }
+/* lever switch */
+.lever {
+  position: relative; width: 48px; height: 26px; border-radius: 999px; flex: none;
+  background: var(--ink-4); border: 1px solid var(--line-2);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.5);
+  transition: background .25s, border-color .25s;
+}
+.lever::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%;
+  background: linear-gradient(180deg, #d8cfbf, #9d9383);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), inset 0 -2px 0 rgba(0, 0, 0, 0.15);
+  transition: transform .3s cubic-bezier(.3, 1.5, .5, 1), background .25s;
+}
+.lever[aria-checked="true"] { background: linear-gradient(90deg, var(--ember-2), var(--ember)); border-color: rgba(255, 210, 150, 0.4); }
+.lever[aria-checked="true"]::after { transform: translateX(22px); background: linear-gradient(180deg, #fff7e8, #f0dcc0); }
+.lever[aria-checked="mixed"]::after { transform: translateX(11px); }
+.lever.jade[aria-checked="true"] { background: linear-gradient(90deg, #3e9b7c, var(--jade)); border-color: rgba(160, 230, 205, 0.4); }
+.lever.sm { width: 38px; height: 21px; }
+.lever.sm::after { width: 15px; height: 15px; }
+.lever.sm[aria-checked="true"]::after { transform: translateX(17px); }
 
-        .module-editor {
-            display: none;
-        }
+/* switchboard */
+.group { margin-top: 38px; }
+.group-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; }
+.group-num { font-family: var(--serif); font-style: italic; color: var(--ember); font-size: 22px; }
+.group-name { font-family: var(--serif); font-size: 24px; font-weight: 400; letter-spacing: -0.01em; }
+.group-line { flex: 1; height: 1px; background: linear-gradient(90deg, var(--line-2), transparent); align-self: center; }
+.group-count { font-family: var(--mono); font-size: 12px; color: var(--text-3); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
 
-        .module-editor.active {
-            display: block;
-        }
+.tile {
+  position: relative; display: flex; flex-direction: column; gap: 12px;
+  padding: 18px; border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(26, 24, 21, 0.85), rgba(18, 17, 15, 0.85));
+  box-shadow: var(--shadow);
+  transition: border-color .3s, transform .3s;
+  overflow: hidden;
+}
+.tile::before {
+  content: ''; position: absolute; left: 18px; right: 18px; top: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-3), transparent);
+  transition: background .3s, box-shadow .3s;
+}
+.tile:hover { border-color: var(--line-2); }
+.tile.on { border-color: rgba(233, 165, 75, 0.26); }
+.tile.on::before { background: linear-gradient(90deg, transparent, var(--ember), transparent); box-shadow: 0 0 22px 2px var(--ember-glow); }
+.tile-top { display: flex; align-items: flex-start; gap: 12px; }
+.tile-icon {
+  width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; flex: none;
+  color: var(--text-2); background: var(--ink-3); border: 1px solid var(--line);
+  transition: color .3s, background .3s;
+}
+.tile.on .tile-icon { color: var(--ember); background: var(--ember-soft); border-color: rgba(233, 165, 75, 0.22); }
+.tile-name { flex: 1; min-width: 0; }
+.tile-name h3 { font-size: 15px; font-weight: 600; letter-spacing: -0.005em; }
+.tile-name p { font-size: 11.5px; color: var(--text-3); display: flex; align-items: center; gap: 5px; }
+.tile-desc { font-size: 12.5px; color: var(--text-2); line-height: 1.55; }
 
-        .module-editor h2 {
-            font-size: 24px;
-            margin-bottom: 20px;
-            color: #333;
-        }
+.picker {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 12px; border-radius: 10px; text-align: left;
+  border: 1px solid var(--line-2); background: var(--ink-1);
+  transition: border-color .2s, background .2s;
+}
+.picker:hover { border-color: var(--line-3); background: var(--ink-2); }
+.picker .pk-l { font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--text-3); font-weight: 600; }
+.picker .pk-v { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.picker .pk-v b { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.picker .pk-v span { font-size: 11.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.picker .ico { color: var(--text-3); }
 
-        .settings-group {
-            margin-bottom: 20px;
-            padding: 15px;
-            background: #f8f9fa;
-            border-radius: 6px;
-        }
+.fine-wrap { border-top: 1px dashed var(--line-2); padding-top: 10px; }
+.fine-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); padding: 2px 0; }
+.fine-toggle:hover { color: var(--text-2); }
+.fine-toggle .ico { transition: transform .25s; }
+.fine-wrap.open .fine-toggle .ico { transform: rotate(180deg); }
+.fine-body { display: none; flex-direction: column; gap: 14px; padding-top: 12px; }
+.fine-wrap.open .fine-body { display: flex; }
+.fine { display: flex; flex-direction: column; gap: 7px; font-size: 12.5px; color: var(--text-2); }
+.fine-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.fine-top output { font-family: var(--mono); color: var(--text); font-size: 12.5px; }
+.fine-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
+.note { font-size: 12px; color: var(--text-3); line-height: 1.5; }
 
-        .settings-group label {
-            display: block;
-            margin: 10px 0 5px 0;
-            font-weight: bold;
-            font-size: 14px;
-            color: #333;
-        }
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; background: transparent; --p: 50%; }
+input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: linear-gradient(90deg, var(--ember) var(--p), var(--ink-4) var(--p)); }
+input[type=range]::-moz-range-track { height: 4px; border-radius: 4px; background: var(--ink-4); }
+input[type=range]::-moz-range-progress { height: 4px; border-radius: 4px; background: var(--ember); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%; background: #f3e6cf; border: 3px solid var(--ember); box-shadow: 0 0 0 4px rgba(233, 165, 75, 0.15); }
+input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #f3e6cf; border: 3px solid var(--ember); }
 
-        .settings-group input,
-        .settings-group select,
-        .settings-group textarea {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-            font-family: monospace;
-        }
+.field {
+  width: 100%; height: 40px; padding: 0 12px; border-radius: 10px;
+  border: 1px solid var(--line-2); background: var(--ink-1); color: var(--text); outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+.field:focus { border-color: rgba(233, 165, 75, 0.6); box-shadow: 0 0 0 3px var(--ember-soft); }
+textarea.field { height: auto; padding: 12px; resize: vertical; font-family: var(--mono); font-size: 13px; line-height: 1.6; }
+.field-label { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--text-3); font-weight: 600; margin-bottom: 7px; display: block; }
 
-        .settings-group textarea {
-            resize: vertical;
-            min-height: 80px;
-        }
+/* ---------- Aside ---------- */
+.aside { min-height: 0; overflow-y: auto; border-left: 1px solid var(--line); background: rgba(18, 17, 15, 0.55); padding: 20px 18px 40px; display: flex; flex-direction: column; gap: 16px; }
+.card { border: 1px solid var(--line); border-radius: var(--radius); background: rgba(26, 24, 21, 0.6); padding: 16px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.card-head h4 { font-family: var(--serif); font-weight: 400; font-size: 18px; }
+.sync-hero { display: flex; align-items: center; gap: 12px; }
+.sync-orb { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--ink-3); color: var(--text-3); border: 1px solid var(--line-2); }
+.sync-orb.on { color: var(--jade); background: var(--jade-soft); border-color: rgba(108, 196, 166, 0.35); box-shadow: 0 0 24px -4px rgba(108, 196, 166, 0.45); }
+.sync-hero b { display: block; font-weight: 600; }
+.sync-hero span { font-size: 12px; color: var(--text-3); }
+.steps { list-style: none; counter-reset: s; display: flex; flex-direction: column; gap: 9px; margin: 14px 0; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 22px 1fr; gap: 9px; font-size: 12.5px; color: var(--text-2); line-height: 1.5; }
+.steps li::before { content: counter(s); font-family: var(--mono); font-size: 11px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line-2); color: var(--ember); }
+.steps code { font-family: var(--mono); font-size: 11.5px; color: var(--text); background: var(--ink-3); padding: 1px 5px; border-radius: 4px; }
+.kv { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border-radius: 10px; overflow: hidden; }
+.kv div { background: var(--ink-1); padding: 10px 12px; }
+.kv b { display: block; font-family: var(--mono); font-size: 20px; font-weight: 500; }
+.kv span { font-size: 11px; color: var(--text-3); }
+.model { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.model:first-of-type { border-top: 0; padding-top: 0; }
+.model-body { flex: 1; min-width: 0; }
+.model-body b { display: block; font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.model-body span { font-size: 11.5px; color: var(--text-3); }
+.log { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.log li { display: grid; grid-template-columns: auto 1fr; gap: 10px; font-size: 12px; color: var(--text-2); }
+.log time { font-family: var(--mono); color: var(--text-3); font-size: 11px; padding-top: 1px; }
 
-        .toggle-switch {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+/* ---------- Empty state ---------- */
+.empty { min-height: 70vh; display: grid; place-items: center; text-align: center; }
+.empty-inner { max-width: 560px; }
+.empty-mark { width: 84px; height: 84px; margin: 0 auto 22px; }
+.empty h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(34px, 4.5vw, 52px); line-height: 1.05; letter-spacing: -0.02em; }
+.empty h1 em { color: var(--ember); }
+.empty p { color: var(--text-2); margin: 14px auto 26px; max-width: 460px; }
+.empty-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 
-        .toggle-switch input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-        }
+/* ---------- Bulk bar ---------- */
+.bulkbar {
+  position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 140%); z-index: 40;
+  display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 16px;
+  border-radius: 16px; border: 1px solid var(--line-2);
+  background: rgba(26, 24, 21, 0.92); backdrop-filter: blur(16px);
+  box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.8);
+  transition: transform .35s cubic-bezier(.2, .9, .3, 1.2), visibility 0s .35s;
+  max-width: calc(100vw - 32px); overflow-x: auto; visibility: hidden;
+}
+.bulkbar.show { transform: translate(-50%, 0); visibility: visible; transition: transform .35s cubic-bezier(.2, .9, .3, 1.2); }
+.bulkbar .n { font-family: var(--mono); color: var(--ember); margin-right: 8px; white-space: nowrap; font-size: 13px; }
+.bulkbar .sep { width: 1px; align-self: stretch; background: var(--line-2); margin: 4px 4px; }
 
-        .button-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 20px;
-        }
+/* ---------- Modals ---------- */
+.scrim {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px;
+  background: rgba(5, 4, 3, 0.66); backdrop-filter: blur(6px);
+  opacity: 0; pointer-events: none; transition: opacity .25s;
+}
+.scrim.show { opacity: 1; pointer-events: auto; }
+.modal {
+  width: min(720px, 100%); max-height: calc(100vh - 40px); display: flex; flex-direction: column;
+  border-radius: 20px; border: 1px solid var(--line-2);
+  background: linear-gradient(180deg, #1c1a17, #131210);
+  box-shadow: 0 40px 100px -30px rgba(0, 0, 0, 0.9);
+  transform: translateY(14px) scale(.98); transition: transform .3s cubic-bezier(.2, .9, .3, 1.1);
+  overflow: hidden;
+}
+.scrim.show .modal { transform: none; }
+.modal.narrow { width: min(460px, 100%); }
+.modal-head { display: flex; align-items: flex-start; gap: 14px; padding: 22px 24px 16px; }
+.modal-badge { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; flex: none; background: var(--ember-soft); color: var(--ember); border: 1px solid rgba(233, 165, 75, 0.25); }
+.modal-head h3 { font-family: var(--serif); font-weight: 400; font-size: 25px; letter-spacing: -0.01em; line-height: 1.15; }
+.modal-head p { color: var(--text-3); font-size: 13px; margin-top: 3px; }
+.modal-head .x { margin-left: auto; color: var(--text-3); width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; flex: none; }
+.modal-head .x:hover { background: var(--ink-3); color: var(--text); }
+.modal-body { padding: 4px 24px 20px; overflow-y: auto; }
+.modal-foot { display: flex; align-items: center; gap: 10px; padding: 14px 24px; border-top: 1px solid var(--line); background: rgba(11, 10, 9, 0.4); flex-wrap: wrap; }
+.modal-foot .spacer { flex: 1; }
+.foot-note { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+.foot-note .ico { color: var(--jade); }
 
-        .button-group button {
-            flex: 1;
-            padding: 12px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: bold;
-            transition: all 0.3s;
-        }
+.stepper { display: flex; align-items: center; gap: 10px; padding: 0 24px 16px; }
+.step { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--text-3); white-space: nowrap; }
+.step i { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-family: var(--mono); font-size: 12px; border: 1px solid var(--line-2); }
+.step.cur { color: var(--text); }
+.step.cur i { border-color: var(--ember); color: var(--ember); box-shadow: 0 0 0 4px var(--ember-soft); }
+.step.done i { background: var(--ember); border-color: var(--ember); color: #1b1208; }
+.step-line { flex: 1; height: 1px; background: var(--line-2); min-width: 20px; }
+.step-line.done { background: var(--ember); }
 
-        .btn-primary {
-            background: #667eea;
-            color: white;
-        }
+.callout { display: flex; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(108, 196, 166, 0.22); background: var(--jade-soft); font-size: 12.5px; color: var(--text-2); margin-bottom: 16px; }
+.callout .ico { color: var(--jade); margin-top: 1px; }
+.callout b { color: var(--text); }
+.callout code { font-family: var(--mono); font-size: 12px; color: var(--text); background: rgba(0, 0, 0, 0.3); padding: 1px 5px; border-radius: 4px; }
+.callout.warn { border-color: rgba(233, 165, 75, 0.28); background: var(--ember-soft); }
+.callout.warn .ico { color: var(--ember); }
 
-        .btn-primary:hover {
-            background: #764ba2;
-        }
+.parse { margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; max-height: 210px; overflow-y: auto; }
+.parse-row { display: grid; grid-template-columns: 70px 1fr auto; gap: 12px; align-items: center; padding: 9px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.parse-row:first-child { border-top: 0; }
+.parse-row .w { font-family: var(--mono); color: var(--ember); font-size: 12px; }
+.parse-row.bad { color: var(--text-3); }
+.parse-row.bad .w { color: var(--rose); }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
-        .btn-secondary {
-            background: #ddd;
-            color: #333;
-        }
+.plan { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.plan-card { border: 1px solid var(--line); border-radius: 13px; padding: 13px; background: rgba(11, 10, 9, 0.35); transition: border-color .25s; }
+.plan-card.on { border-color: rgba(233, 165, 75, 0.3); }
+.plan-card-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.plan-card-top .tile-icon { width: 34px; height: 34px; border-radius: 9px; }
+.plan-card.on .tile-icon { color: var(--ember); background: var(--ember-soft); }
+.plan-card-top b { display: block; font-size: 13.5px; font-weight: 600; }
+.plan-card-top span { font-size: 11.5px; color: var(--text-3); }
 
-        .btn-secondary:hover {
-            background: #ccc;
-        }
+.codebox { font-family: var(--mono); font-size: 12px; word-break: break-all; line-height: 1.6; color: var(--text-2); }
 
-        .btn-danger {
-            background: #dc3545;
-            color: white;
-        }
+/* popover */
+.pop {
+  position: fixed; z-index: 90; min-width: 240px; max-width: 340px; max-height: 320px; overflow-y: auto;
+  padding: 6px; border-radius: 13px; border: 1px solid var(--line-2);
+  background: rgba(28, 26, 23, 0.98); backdrop-filter: blur(12px);
+  box-shadow: 0 24px 60px -16px rgba(0, 0, 0, 0.85);
+  opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity .15s, transform .15s;
+}
+.pop.show { opacity: 1; transform: none; pointer-events: auto; }
+.pop-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 9px; text-align: left; }
+.pop-item:hover, .pop-item.hl { background: var(--ink-3); }
+.pop-item .pv { flex: 1; min-width: 0; }
+.pop-item .pv b { display: block; font-weight: 600; font-size: 13px; }
+.pop-item .pv span { display: block; font-size: 11.5px; color: var(--text-3); }
+.pop-item .tick { color: var(--ember); visibility: hidden; }
+.pop-item.sel .tick { visibility: visible; }
+.pop-sep { height: 1px; background: var(--line); margin: 5px 4px; }
 
-        .btn-danger:hover {
-            background: #c82333;
-        }
+/* palette */
+.palette { width: min(620px, 100%); align-self: start; margin-top: 12vh; }
+.palette-input { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); color: var(--text-3); }
+.palette-input input { flex: 1; background: none; border: 0; outline: 0; font-size: 17px; color: var(--text); }
+.palette-list { max-height: 380px; overflow-y: auto; padding: 8px; }
+.palette-sec { font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; color: var(--text-3); padding: 10px 10px 6px; font-weight: 600; }
+.palette-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px; border-radius: 10px; text-align: left; color: var(--text-2); }
+.palette-item.hl { background: var(--ink-3); color: var(--text); }
+.palette-item .ico { color: var(--text-3); }
+.palette-item.hl .ico { color: var(--ember); }
+.palette-item span { flex: 1; }
+.palette-item small { font-family: var(--mono); font-size: 11px; color: var(--text-3); }
 
-        .alert {
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 6px;
-            font-size: 14px;
-        }
+/* toasts */
+.toasts { position: fixed; top: 76px; right: 22px; z-index: 100; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.toast {
+  display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 12px;
+  border: 1px solid var(--line-2); background: rgba(28, 26, 23, 0.96); backdrop-filter: blur(12px);
+  box-shadow: 0 20px 40px -16px rgba(0, 0, 0, 0.8); font-size: 13px; max-width: 360px;
+  animation: tin .35s cubic-bezier(.2, .9, .3, 1.2);
+}
+.toast .ico { color: var(--jade); }
+.toast.err .ico { color: var(--rose); }
+.toast.out { animation: tout .25s forwards; }
+@keyframes tin { from { opacity: 0; transform: translateX(20px); } }
+@keyframes tout { to { opacity: 0; transform: translateX(20px); } }
 
-        .alert-success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
+.reveal { animation: rise .5s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } }
 
-        .alert-error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
 
-        .footer {
-            background: #f8f9fa;
-            border-top: 1px solid #ddd;
-            padding: 20px;
-            text-align: center;
-            font-size: 12px;
-            color: #666;
-        }
-
-        .module-status {
-            display: inline-block;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            margin-right: 8px;
-            background: #ccc;
-        }
-
-        .module-status.enabled {
-            background: #28a745;
-        }
-
-        @media (max-width: 768px) {
-            .content {
-                flex-direction: column;
-            }
-
-            .sidebar {
-                width: 100%;
-                border-right: none;
-                border-bottom: 1px solid #ddd;
-                max-height: 200px;
-            }
-
-            .header h1 {
-                font-size: 24px;
-            }
-        }
-    </style>
+@media (max-width: 1280px) {
+  .layout { grid-template-columns: 300px minmax(0, 1fr); }
+  .aside { display: none; }
+  .aside-inline { display: flex !important; }
+}
+@media (max-width: 860px) {
+  body { overflow: auto; }
+  .app { height: auto; min-height: 100vh; }
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .rail { border-right: 0; border-bottom: 1px solid var(--line); min-width: 0; }
+  .cmdk kbd { display: none; }
+  .hero-row { align-items: flex-start; flex-direction: column; }
+}
+@media (max-width: 600px) {
+  .brand-name { font-size: 16px; }
+  .brand-name em { display: none; }
+  #syncText { display: none; }
+  .sync-pill { padding: 10px; }
+  .rail-head, .main { padding-left: 16px; padding-right: 16px; }
+  .stat .v { font-size: 21px; }
+  .rail-list { max-height: 300px; padding-bottom: 12px; }
+  .main { overflow: visible; padding-bottom: 120px; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .brand-sub, .cmdk span, .hide-sm { display: none; }
+  .cmdk { flex: 0; margin-left: auto; }
+  .topbar { padding: 12px 16px; gap: 10px; }
+  .plan, .row2 { grid-template-columns: 1fr; }
+  .tiles { grid-template-columns: 1fr; }
+}
+.aside-inline { display: none; flex-direction: column; gap: 16px; margin-top: 40px; }
+</style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🎮 TW Suite Dashboard</h1>
-            <p>Controle centralizado de automação para Tribal Wars</p>
-        </div>
 
-        <div class="content">
-            <div class="sidebar">
-                <div class="account-selector">
-                    <h3>Conta Ativa</h3>
-                    <input type="text" id="serverInput" placeholder="Servidor (ex: br144)" value="br144">
-                    <input type="text" id="nickInput" placeholder="Nick (ex: Player)" value="">
-                    <button onclick="loadAccount()">Carregar Conta</button>
-                    <button onclick="newAccount()" class="btn-secondary">Nova Conta</button>
-                </div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="g-ember" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f6c47a"/><stop offset="1" stop-color="#d8712d"/>
+    </linearGradient>
+  </defs>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9.5 2.5h5"/></symbol>
+  <symbol id="i-swords" viewBox="0 0 24 24"><path d="M14.5 17.5 3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M19 21l2-2M9.5 14.5 5 19M7 21l-2-2"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.6-3.4 8.3-8 9-4.6-.7-8-4.4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></symbol>
+  <symbol id="i-basket" viewBox="0 0 24 24"><path d="M3 10h18l-1.8 9.2A2 2 0 0 1 17.2 21H6.8a2 2 0 0 1-2-1.8L3 10zM8 10l4-6 4 6M9 14v3M15 14v3"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5"/></symbol>
+  <symbol id="i-scale" viewBox="0 0 24 24"><path d="M12 3v18M7 21h10M5 7h14M5 7l-3 7a3 3 0 0 0 6 0L5 7zM19 7l-3 7a3 3 0 0 0 6 0l-3-7z"/></symbol>
+  <symbol id="i-hammer" viewBox="0 0 24 24"><path d="M15 12l-8.5 8.5a2.1 2.1 0 0 1-3-3L12 9M17.6 15 22 10.6M20.9 11.7l-6.6-6.6a6 6 0 0 0-4.2-1.8H8l1 1a5 5 0 0 1 1.5 3.6V9l2 2h1.2c.9 0 1.8.4 2.5 1l.9.9"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 1 1 12 0v5l2 2H4l2-2zM10 21h4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-stack" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5M4 21h16"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/></symbol>
+  <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3M7 15h10"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4V3z"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 1 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3M14 9l2 2"/></symbol>
+  <symbol id="i-crest" viewBox="0 0 48 48"><path d="M24 4 40 10v12c0 10-7 18.5-16 22C15 40.5 8 32 8 22V10l16-6z" stroke="url(#g-ember)" stroke-width="2"/><path d="M16 17h16M24 17v17M18 28l12-8M18 20l12 8" stroke="url(#g-ember)" stroke-width="1.6" opacity=".55"/><circle cx="24" cy="24" r="3" fill="url(#g-ember)" stroke="none"/></symbol>
+</svg>
 
-                <h3>Módulos</h3>
-                <ul class="module-list" id="moduleList"></ul>
-
-                <div style="margin-top: 30px;">
-                    <h3>Ações</h3>
-                    <button onclick="exportConfig()">📥 Exportar Config</button>
-                    <button onclick="document.getElementById('importInput').click(); return false;">📤 Importar Config</button>
-                    <input type="file" id="importInput" style="display:none;" onchange="importConfig(event)">
-                </div>
-            </div>
-
-            <div class="main-content">
-                <div id="alertBox"></div>
-                <div id="moduleEditors"></div>
-            </div>
-        </div>
-
-        <div class="footer">
-            <p>TW Suite v0.9.0 | Sincronize com Tampermonkey exportando/importando configurações</p>
-        </div>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 48 48" fill="none"><use href="#i-crest"/></svg>
+      <div>
+        <div class="brand-name">TW Suite <em>Sala de Guerra</em></div>
+        <div class="brand-sub">Central de comando das suas contas</div>
+      </div>
     </div>
+    <button class="cmdk" id="openPalette" type="button">
+      <svg class="ico sm"><use href="#i-search"/></svg>
+      <span>Buscar conta ou comando…</span>
+      <kbd>Ctrl K</kbd>
+    </button>
+    <div class="sync-pill" id="syncPill" title="Estado da sincronização"><i class="sync-dot"></i><span id="syncText">Offline</span></div>
+    <button class="icon-btn hide-sm" id="btnExport" type="button" title="Exportar backup"><svg class="ico sm"><use href="#i-down"/></svg>Backup</button>
+    <button class="icon-btn hide-sm" id="btnImport" type="button" title="Importar backup"><svg class="ico sm"><use href="#i-up"/></svg>Importar</button>
+    <input type="file" id="importFile" accept="application/json,.json" hidden>
+  </header>
 
-    <script>
-        const MODULES = [
-            { id: 'auto-farm', name: 'Auto Farm', desc: 'Descoberta e envio de ataques com modelos de tropas' },
-            { id: 'scheduler', name: 'Agendador', desc: 'Fila persistente de ataques agendados' },
-            { id: 'auto-recruit', name: 'Auto Recrutamento', desc: 'Recruta tropas automaticamente' },
-            { id: 'auto-collect', name: 'Coleta Automática', desc: 'Coleta/desbloqueia na tela de saque' },
-            { id: 'notif-discord', name: 'Notificações Discord', desc: 'Alertas via webhook do Discord' },
-            { id: 'resource-balancer', name: 'Balanceador', desc: 'Distribui recursos entre aldeias' },
-            { id: 'mega-builder', name: 'Mega Construtor', desc: 'Constrói automaticamente' },
-            { id: 'mass-collect', name: 'Coleta em Massa', desc: 'Coleta todos os alvos de farm' },
-            { id: 'auto-defense', name: 'Auto Defesa', desc: 'Mobiliza tropas quando ataque chega' }
-        ];
+  <div class="layout">
+    <aside class="rail" aria-label="Contas">
+      <div class="rail-head">
+        <div class="eyebrow">Frota</div>
+        <div class="rail-title"><h2>Suas contas</h2><span class="count" id="railCount">0</span></div>
+        <div class="rail-actions">
+          <button class="btn btn-ember btn-sm" id="btnAddOne" type="button"><svg class="ico sm"><use href="#i-plus"/></svg>Nova</button>
+          <button class="btn btn-ghost btn-sm" id="btnBulk" type="button"><svg class="ico sm"><use href="#i-stack"/></svg>Em massa</button>
+        </div>
+        <label class="search">
+          <svg class="ico sm"><use href="#i-search"/></svg>
+          <input id="railSearch" placeholder="Filtrar por nick ou mundo" autocomplete="off">
+          <kbd>/</kbd>
+        </label>
+        <div class="chips" id="railChips"></div>
+      </div>
+      <div class="rail-list" id="railList"></div>
+    </aside>
 
-        let currentAccount = {};
-        let config = {};
+    <main class="main" id="main"></main>
 
-        function init() {
-            renderModuleList();
-            renderModuleEditors();
-            loadAccount();
+    <aside class="aside" id="aside" aria-label="Painel lateral"></aside>
+  </div>
+</div>
+
+<div class="bulkbar" id="bulkbar" role="toolbar" aria-label="Ações em lote"></div>
+<div class="pop" id="pop" role="listbox"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<div class="scrim" id="scrim"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
+
+<script>
+(() => {
+'use strict';
+
+// ------------------------------------------------------------------
+// Módulos — ids e chaves de settings batem com tw-suite.user.js
+// ------------------------------------------------------------------
+const UNITS = [
+  { value: 'spear', label: 'Lanceiro' },
+  { value: 'sword', label: 'Espadachim' },
+  { value: 'axe', label: 'Bárbaro' },
+  { value: 'archer', label: 'Arqueiro' },
+  { value: 'spy', label: 'Explorador' },
+  { value: 'light', label: 'Cavalaria leve' },
+  { value: 'marcher', label: 'Arqueiro a cavalo' },
+  { value: 'heavy', label: 'Cavalaria pesada' },
+];
+const unitLabel = (v) => (UNITS.find((u) => u.value === v) || { label: v }).label;
+
+const GROUPS = ['Ofensiva', 'Exército', 'Economia', 'Alertas'];
+const MODULES = [
+  {
+    id: 'auto-farm', name: 'Auto Farm', group: 'Ofensiva', icon: 'target', screen: 'Praça de reunião',
+    desc: 'Encontra aldeias bárbaras próximas e envia ataques com seus modelos de tropas.',
+    defaults: { maxDistance: 12, cooldownMinutes: 30, dryRun: true },
+    presets: [
+      { id: 'leve', label: 'Leve', settings: { maxDistance: 8, cooldownMinutes: 60 } },
+      { id: 'equilibrado', label: 'Equilibrado', settings: { maxDistance: 12, cooldownMinutes: 30 } },
+      { id: 'agressivo', label: 'Agressivo', settings: { maxDistance: 20, cooldownMinutes: 15 } },
+    ],
+    hint: (s) => `${s.maxDistance} campos · a cada ${s.cooldownMinutes} min`,
+    fields: [
+      { key: 'maxDistance', type: 'range', label: 'Distância máxima', min: 1, max: 40, step: 1, unit: 'campos' },
+      { key: 'cooldownMinutes', type: 'range', label: 'Espera por alvo', min: 5, max: 240, step: 5, unit: 'min' },
+    ],
+    note: 'Os modelos de tropas continuam sendo criados dentro do jogo, na Praça de reunião.',
+  },
+  {
+    id: 'scheduler', name: 'Agendador', group: 'Ofensiva', icon: 'clock', screen: 'Praça de reunião',
+    desc: 'Dispara comandos no segundo exato, sincronizado com o relógio do servidor.',
+    defaults: {}, presets: [], hint: () => 'Fila montada dentro do jogo', fields: [],
+    note: 'Os comandos são agendados no jogo, pela tela de confirmação de ataque.',
+  },
+  {
+    id: 'auto-recruit', name: 'Recrutamento', group: 'Exército', icon: 'swords', screen: 'Quartel',
+    desc: 'Mantém a fila de recrutamento girando com a unidade escolhida.',
+    defaults: { unit: 'light', amount: 10, interval: 5000, dryRun: true },
+    presets: [
+      { id: 'lanca', label: 'Lanceiros', settings: { unit: 'spear', amount: 20 } },
+      { id: 'barbaro', label: 'Bárbaros', settings: { unit: 'axe', amount: 25 } },
+      { id: 'cl', label: 'Cavalaria leve', settings: { unit: 'light', amount: 10 } },
+    ],
+    hint: (s) => `${s.amount} × ${unitLabel(s.unit)} · a cada ${Math.round(s.interval / 1000)}s`,
+    fields: [
+      { key: 'unit', type: 'select', label: 'Unidade', options: UNITS },
+      { key: 'amount', type: 'range', label: 'Quantidade por ciclo', min: 1, max: 300, step: 1, unit: 'un.' },
+      { key: 'interval', type: 'range', label: 'Intervalo', min: 3000, max: 120000, step: 1000, scale: 1000, unit: 's' },
+    ],
+  },
+  {
+    id: 'auto-defense', name: 'Auto Defesa', group: 'Exército', icon: 'shield', screen: 'Qualquer tela',
+    desc: 'Reage quando detecta ataque chegando e mobiliza tropas de defesa.',
+    defaults: { mobilizeOnAttack: true, unit: 'spear', amount: 50, dryRun: true },
+    presets: [
+      { id: 'l50', label: 'Guarda leve', settings: { unit: 'spear', amount: 50, mobilizeOnAttack: true } },
+      { id: 'l200', label: 'Muralha de lanças', settings: { unit: 'spear', amount: 200, mobilizeOnAttack: true } },
+      { id: 'e100', label: 'Espadachins', settings: { unit: 'sword', amount: 100, mobilizeOnAttack: true } },
+    ],
+    hint: (s) => `${s.amount} × ${unitLabel(s.unit)}${s.mobilizeOnAttack ? '' : ' · sem mobilizar'}`,
+    fields: [
+      { key: 'mobilizeOnAttack', type: 'switch', label: 'Mobilizar ao detectar ataque' },
+      { key: 'unit', type: 'select', label: 'Unidade', options: UNITS },
+      { key: 'amount', type: 'range', label: 'Quantidade', min: 1, max: 1000, step: 1, unit: 'un.' },
+    ],
+  },
+  {
+    id: 'auto-collect', name: 'Coleta', group: 'Economia', icon: 'basket', screen: 'Coleta',
+    desc: 'Envia e recolhe as coletas de recursos automaticamente.',
+    defaults: { interval: 3000, dryRun: true },
+    presets: [
+      { id: 'rapida', label: 'Rápida', settings: { interval: 3000 } },
+      { id: 'normal', label: 'Normal', settings: { interval: 10000 } },
+      { id: 'discreta', label: 'Discreta', settings: { interval: 30000 } },
+    ],
+    hint: (s) => `Verifica a cada ${Math.round(s.interval / 1000)}s`,
+    fields: [{ key: 'interval', type: 'range', label: 'Intervalo', min: 1000, max: 120000, step: 1000, scale: 1000, unit: 's' }],
+  },
+  {
+    id: 'mass-collect', name: 'Coleta em Massa', group: 'Economia', icon: 'layers', screen: 'Assistente de saque',
+    desc: 'Clica nos saques do assistente em lotes, com pausa entre eles.',
+    defaults: { interval: 1000, maxPerBatch: 10, dryRun: true },
+    presets: [
+      { id: 'b5', label: 'Lote pequeno', settings: { maxPerBatch: 5 } },
+      { id: 'b10', label: 'Lote médio', settings: { maxPerBatch: 10 } },
+      { id: 'b25', label: 'Lote grande', settings: { maxPerBatch: 25 } },
+    ],
+    hint: (s) => `${s.maxPerBatch} por lote · ${(s.interval / 1000).toFixed(1).replace('.0', '')}s`,
+    fields: [
+      { key: 'maxPerBatch', type: 'range', label: 'Saques por lote', min: 1, max: 50, step: 1, unit: 'un.' },
+      { key: 'interval', type: 'range', label: 'Intervalo', min: 500, max: 10000, step: 500, scale: 1000, unit: 's', decimals: 1 },
+    ],
+  },
+  {
+    id: 'resource-balancer', name: 'Balanceador', group: 'Economia', icon: 'scale', screen: 'Visão das aldeias',
+    desc: 'Mantém os armazéns das aldeias equilibrados entre si.',
+    defaults: { targetPercentage: 50, interval: 10000, dryRun: true },
+    presets: [
+      { id: 'reserva', label: 'Reserva alta', settings: { targetPercentage: 70 } },
+      { id: 'meio', label: 'Equilibrado', settings: { targetPercentage: 50 } },
+      { id: 'fluxo', label: 'Fluxo livre', settings: { targetPercentage: 30 } },
+    ],
+    hint: (s) => `Mantém ${s.targetPercentage}% por aldeia`,
+    fields: [
+      { key: 'targetPercentage', type: 'range', label: 'Alvo por aldeia', min: 10, max: 90, step: 5, unit: '%' },
+      { key: 'interval', type: 'range', label: 'Intervalo', min: 5000, max: 120000, step: 5000, scale: 1000, unit: 's' },
+    ],
+  },
+  {
+    id: 'mega-builder', name: 'Construção', group: 'Economia', icon: 'hammer', screen: 'Edifício principal',
+    desc: 'Coloca a próxima construção disponível na fila sempre que houver espaço.',
+    defaults: { interval: 5000, dryRun: true },
+    presets: [
+      { id: 'normal', label: 'Ritmo normal', settings: { interval: 5000 } },
+      { id: 'calmo', label: 'Ritmo calmo', settings: { interval: 30000 } },
+    ],
+    hint: (s) => `Verifica a cada ${Math.round(s.interval / 1000)}s`,
+    fields: [{ key: 'interval', type: 'range', label: 'Intervalo', min: 2000, max: 120000, step: 1000, scale: 1000, unit: 's' }],
+  },
+  {
+    id: 'notif-discord', name: 'Alertas no Discord', group: 'Alertas', icon: 'bell', screen: 'Qualquer tela', noTestMode: true,
+    desc: 'Avisa no seu servidor do Discord quando algo importante acontece.',
+    defaults: { webhookUrl: '', enableAttackAlert: true, enableDefenseAlert: true, dryRun: false },
+    presets: [],
+    hint: (s) => (s.webhookUrl ? 'Webhook configurado' : 'Falta o webhook'),
+    fields: [
+      { key: 'webhookUrl', type: 'text', label: 'Webhook do Discord', placeholder: 'https://discord.com/api/webhooks/…' },
+      { key: 'enableAttackAlert', type: 'switch', label: 'Ataques chegando' },
+      { key: 'enableDefenseAlert', type: 'switch', label: 'Eventos de defesa' },
+    ],
+  },
+];
+const MOD = Object.fromEntries(MODULES.map((m) => [m.id, m]));
+const PLAN_MODULES = ['auto-farm', 'auto-recruit', 'auto-collect', 'mass-collect', 'mega-builder', 'auto-defense'];
+
+const BUILTIN_MODELS = [
+  {
+    id: 'm-seguro', builtin: true, name: 'Início seguro', desc: 'Farm leve e coleta normal',
+    modules: {
+      'auto-farm': { enabled: true, settings: { maxDistance: 8, cooldownMinutes: 60 } },
+      'auto-collect': { enabled: true, settings: { interval: 10000 } },
+    },
+  },
+  {
+    id: 'm-farm', builtin: true, name: 'Farm pesado', desc: 'Farm agressivo, saque em lote, cavalaria',
+    modules: {
+      'auto-farm': { enabled: true, settings: { maxDistance: 20, cooldownMinutes: 15 } },
+      'mass-collect': { enabled: true, settings: { maxPerBatch: 25 } },
+      'auto-recruit': { enabled: true, settings: { unit: 'light', amount: 10 } },
+    },
+  },
+  {
+    id: 'm-eco', builtin: true, name: 'Economia', desc: 'Coleta, construção e balanceamento',
+    modules: {
+      'auto-collect': { enabled: true, settings: { interval: 10000 } },
+      'mega-builder': { enabled: true, settings: { interval: 5000 } },
+      'resource-balancer': { enabled: true, settings: { targetPercentage: 50 } },
+    },
+  },
+];
+
+// ------------------------------------------------------------------
+// Estado + persistência local
+// ------------------------------------------------------------------
+const LS_KEY = 'twsuite-dashboard:v2';
+const LEGACY_PREFIX = 'tw-suite-config:';
+
+const state = {
+  profiles: {},
+  accounts: {},
+  models: [],
+  selected: null,
+  checked: new Set(),
+  filter: 'all',
+  query: '',
+  openFine: new Set(),
+  log: [],
+};
+
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const $ = (sel, root = document) => root.querySelector(sel);
+const icon = (name, cls = '') => `<svg class="ico ${cls}"><use href="#i-${name}"/></svg>`;
+const fmt = (n) => Number(n || 0).toLocaleString('pt-BR');
+
+function lsRead(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function lsWrite(key, val) {
+  try { localStorage.setItem(key, val); return true; } catch { return false; }
+}
+
+function loadLocal() {
+  const raw = lsRead(LS_KEY);
+  if (raw) {
+    try {
+      const data = JSON.parse(raw);
+      state.profiles = data.profiles || {};
+      state.accounts = data.accounts || {};
+      state.models = data.models || [];
+      state.selected = data.selected || null;
+    } catch { /* estado corrompido: começa vazio */ }
+  }
+  migrateLegacy();
+  Object.keys(state.profiles).forEach(normalizeProfile);
+}
+
+function migrateLegacy() {
+  let migrated = 0;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(LEGACY_PREFIX)) continue;
+      const [world, ...nickParts] = k.slice(LEGACY_PREFIX.length).split(':');
+      const nick = nickParts.join(':');
+      if (!world || !nick) continue;
+      const key = accountKey(world, nick);
+      if (state.profiles[key]) continue;
+      const cfg = JSON.parse(localStorage.getItem(k) || '{}');
+      state.profiles[key] = profileFromLegacy(cfg);
+      migrated++;
+    }
+  } catch { /* sem acesso ao storage */ }
+  if (migrated) addLog(`${migrated} conta(s) migrada(s) do dashboard antigo`);
+}
+
+function profileFromLegacy(cfg) {
+  const p = newProfile();
+  for (const [id, val] of Object.entries(cfg || {})) {
+    if (!MOD[id] || !val || typeof val !== 'object') continue;
+    const { enabled, ...settings } = val;
+    p.modules[id].enabled = !!enabled;
+    Object.assign(p.modules[id].settings, settings);
+  }
+  return p;
+}
+
+function persistLocal() {
+  lsWrite(LS_KEY, JSON.stringify({
+    profiles: state.profiles, accounts: state.accounts, models: state.models, selected: state.selected,
+  }));
+}
+
+// ------------------------------------------------------------------
+// Perfis
+// ------------------------------------------------------------------
+function accountKey(world, nick) {
+  return `${String(world).trim().toLowerCase()}:${String(nick).trim()}`;
+}
+function splitKey(key) {
+  const i = key.indexOf(':');
+  return { world: key.slice(0, i), nick: key.slice(i + 1) };
+}
+
+function newProfile() {
+  const modules = {};
+  MODULES.forEach((m) => { modules[m.id] = { enabled: false, settings: clone(m.defaults) }; });
+  return { updatedAt: Date.now(), modules };
+}
+
+function normalizeProfile(key) {
+  const p = state.profiles[key];
+  if (!p.modules) p.modules = {};
+  MODULES.forEach((m) => {
+    const cur = p.modules[m.id] || {};
+    p.modules[m.id] = { enabled: !!cur.enabled, settings: { ...clone(m.defaults), ...(cur.settings || {}) } };
+  });
+}
+
+function allKeys() {
+  const keys = new Set([...Object.keys(state.profiles), ...Object.keys(state.accounts)]);
+  keys.forEach((k) => { if (!state.profiles[k]) { state.profiles[k] = newProfile(); } });
+  return [...keys].sort((a, b) => {
+    const sa = state.accounts[a], sb = state.accounts[b];
+    return ((sb && sb.lastSeen) || 0) - ((sa && sa.lastSeen) || 0) || a.localeCompare(b);
+  });
+}
+
+function testState(profile) {
+  const mods = MODULES.filter((m) => !m.noTestMode && 'dryRun' in m.defaults);
+  const on = mods.filter((m) => profile.modules[m.id].settings.dryRun).length;
+  if (on === mods.length) return 'true';
+  if (on === 0) return 'false';
+  return 'mixed';
+}
+
+function setTestMode(key, on) {
+  const p = state.profiles[key];
+  MODULES.forEach((m) => {
+    if (!m.noTestMode && 'dryRun' in m.defaults) p.modules[m.id].settings.dryRun = on;
+  });
+  touch(key);
+}
+
+function activeCount(profile) {
+  return MODULES.filter((m) => profile.modules[m.id].enabled).length;
+}
+
+function presetOf(mod, cfg) {
+  if (!cfg.enabled) return 'off';
+  if (!mod.presets.length) return 'on';
+  const hit = mod.presets.find((pr) => Object.entries(pr.settings).every(([k, v]) => cfg.settings[k] === v));
+  return hit ? hit.id : 'custom';
+}
+
+function presetLabel(mod, cfg) {
+  const id = presetOf(mod, cfg);
+  if (id === 'off') return { title: 'Desligado', sub: 'Não roda nesta conta' };
+  if (id === 'on') return { title: 'Ligado', sub: mod.hint(cfg.settings) };
+  if (id === 'custom') return { title: 'Personalizado', sub: mod.hint(cfg.settings) };
+  const pr = mod.presets.find((p) => p.id === id);
+  return { title: pr.label, sub: mod.hint(cfg.settings) };
+}
+
+function applyPreset(cfg, mod, presetId) {
+  if (presetId === 'off') { cfg.enabled = false; return; }
+  cfg.enabled = true;
+  const pr = mod.presets.find((p) => p.id === presetId);
+  if (pr) Object.assign(cfg.settings, clone(pr.settings));
+}
+
+function applyModel(key, model) {
+  const p = state.profiles[key];
+  MODULES.forEach((m) => {
+    const src = model.modules[m.id];
+    const dry = p.modules[m.id].settings.dryRun;
+    if (!src) {
+      p.modules[m.id].enabled = false;
+      return;
+    }
+    p.modules[m.id].enabled = !!src.enabled;
+    Object.assign(p.modules[m.id].settings, clone(src.settings || {}));
+    if ('dryRun' in m.defaults) p.modules[m.id].settings.dryRun = dry;
+  });
+  touch(key);
+}
+
+function modelFromProfile(name, profile) {
+  const modules = {};
+  MODULES.forEach((m) => {
+    const cfg = profile.modules[m.id];
+    if (!cfg.enabled) return;
+    const { dryRun, webhookUrl, ...settings } = cfg.settings;
+    modules[m.id] = { enabled: true, settings };
+  });
+  const n = Object.keys(modules).length;
+  return { id: 'm-' + Math.random().toString(36).slice(2, 9), name, desc: `${n} módulo(s) ativo(s)`, modules };
+}
+
+const allModels = () => [...BUILTIN_MODELS, ...state.models];
+
+// ------------------------------------------------------------------
+// Ponte com o Tampermonkey (postMessage)
+// ------------------------------------------------------------------
+const bridge = { connected: false, version: null, seq: 0, pending: new Map() };
+
+function bridgeCall(op, payload, timeout = 1500) {
+  return new Promise((resolve, reject) => {
+    const id = ++bridge.seq;
+    const timer = setTimeout(() => { bridge.pending.delete(id); reject(new Error('timeout')); }, timeout);
+    bridge.pending.set(id, {
+      resolve: (v) => { clearTimeout(timer); resolve(v); },
+      reject: (e) => { clearTimeout(timer); reject(e); },
+    });
+    window.postMessage({ twsuite: 'bridge-req', id, op, payload }, '*');
+  });
+}
+
+window.addEventListener('message', (ev) => {
+  if (ev.source !== window || !ev.data) return;
+  if (ev.data.twsuite === 'bridge-res') {
+    const p = bridge.pending.get(ev.data.id);
+    if (!p) return;
+    bridge.pending.delete(ev.data.id);
+    ev.data.ok ? p.resolve(ev.data.payload) : p.reject(new Error((ev.data.payload && ev.data.payload.error) || 'erro'));
+  } else if (ev.data.twsuite === 'bridge-ready' && !bridge.connected) {
+    connectBridge();
+  }
+});
+
+async function connectBridge() {
+  try {
+    const hello = await bridgeCall('hello');
+    bridge.connected = true;
+    bridge.version = hello.version;
+    await pullFromBridge();
+    addLog(`Tampermonkey conectado (script v${hello.version})`);
+    renderAll();
+  } catch { /* script ausente ou sem acesso a arquivos locais */ }
+}
+
+async function pullFromBridge() {
+  const data = await bridgeCall('pull');
+  let changedLocal = false;
+  for (const [key, remote] of Object.entries(data.profiles || {})) {
+    const local = state.profiles[key];
+    if (!local || (remote.updatedAt || 0) > (local.updatedAt || 0)) {
+      state.profiles[key] = remote;
+      normalizeProfile(key);
+    }
+  }
+  for (const [key, local] of Object.entries(state.profiles)) {
+    const remote = (data.profiles || {})[key];
+    if (!remote || (local.updatedAt || 0) > (remote.updatedAt || 0)) changedLocal = true;
+  }
+  state.accounts = data.accounts || {};
+  persistLocal();
+  if (changedLocal) await pushToBridge();
+}
+
+async function pushToBridge() {
+  if (!bridge.connected) return false;
+  try {
+    await bridgeCall('pushProfiles', { profiles: state.profiles });
+    return true;
+  } catch {
+    bridge.connected = false;
+    renderSync();
+    return false;
+  }
+}
+
+// ------------------------------------------------------------------
+// Salvamento automático
+// ------------------------------------------------------------------
+let saveTimer = null;
+let saving = false;
+
+function touch(key) {
+  if (state.profiles[key]) state.profiles[key].updatedAt = Date.now();
+  scheduleSave();
+}
+
+function scheduleSave() {
+  saving = true;
+  renderSync();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    persistLocal();
+    await pushToBridge();
+    saving = false;
+    renderSync();
+  }, 450);
+}
+
+// ------------------------------------------------------------------
+// Utilidades de UI
+// ------------------------------------------------------------------
+function addLog(text) {
+  state.log.unshift({ at: new Date(), text });
+  state.log = state.log.slice(0, 12);
+  renderAside();
+}
+
+function toast(text, kind = 'ok') {
+  const el = document.createElement('div');
+  el.className = `toast ${kind === 'err' ? 'err' : ''}`;
+  el.innerHTML = `${icon(kind === 'err' ? 'x' : 'check', 'sm')}<span>${esc(text)}</span>`;
+  $('#toasts').appendChild(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 260); }, 3200);
+}
+
+function ago(ts) {
+  if (!ts) return null;
+  const s = Math.max(0, (Date.now() - ts) / 1000);
+  if (s < 60) return 'agora';
+  if (s < 3600) return `há ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `há ${Math.floor(s / 3600)} h`;
+  return `há ${Math.floor(s / 86400)} d`;
+}
+
+function worldParts(world) {
+  const m = String(world).match(/^([a-z]+?)(s|p|c)?(\d+)$/i);
+  if (!m) return { prefix: world.slice(0, 3), num: '' };
+  return { prefix: m[1] + (m[2] || ''), num: m[3] };
+}
+
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  ta.remove();
+  return Promise.resolve();
+}
+
+// ------------------------------------------------------------------
+// Render: sync pill
+// ------------------------------------------------------------------
+function renderSync() {
+  const pill = $('#syncPill');
+  pill.classList.toggle('on', bridge.connected && !saving);
+  pill.classList.toggle('saving', saving);
+  $('#syncText').textContent = saving
+    ? 'Salvando…'
+    : bridge.connected ? 'Sincronizado' : 'Só neste navegador';
+  pill.title = bridge.connected
+    ? `Conectado ao TW Suite v${bridge.version} no Tampermonkey`
+    : 'Tampermonkey não detectado — use o código de sincronização';
+}
+
+// ------------------------------------------------------------------
+// Render: rail
+// ------------------------------------------------------------------
+const FILTERS = [
+  { id: 'all', label: 'Todas' },
+  { id: 'active', label: 'Com módulos' },
+  { id: 'test', label: 'Em teste' },
+  { id: 'unseen', label: 'Nunca vistas' },
+];
+
+function filteredKeys() {
+  const q = state.query.trim().toLowerCase();
+  return allKeys().filter((k) => {
+    const p = state.profiles[k];
+    if (q && !k.toLowerCase().includes(q)) return false;
+    if (state.filter === 'active') return activeCount(p) > 0;
+    if (state.filter === 'test') return testState(p) !== 'false' && activeCount(p) > 0;
+    if (state.filter === 'unseen') return !state.accounts[k];
+    return true;
+  });
+}
+
+function renderRail() {
+  const total = allKeys().length;
+  $('#railCount').textContent = String(total).padStart(2, '0');
+  $('#railChips').innerHTML = FILTERS.map((f) =>
+    `<button class="chip ${state.filter === f.id ? 'on' : ''}" data-filter="${f.id}" type="button">${f.label}</button>`).join('');
+
+  const keys = filteredKeys();
+  if (!keys.length) {
+    $('#railList').innerHTML = `<div class="rail-empty">${total ? 'Nenhuma conta com esse filtro.' : 'Nenhuma conta ainda.<br>Adicione a primeira acima.'}</div>`;
+    return;
+  }
+  $('#railList').innerHTML = keys.map((k) => {
+    const { world, nick } = splitKey(k);
+    const p = state.profiles[k];
+    const s = state.accounts[k];
+    const wp = worldParts(world);
+    const active = activeCount(p);
+    const ts = testState(p);
+    const meta = s
+      ? `${fmt(s.points)} pts · ${s.villages} ald. · ${ago(s.lastSeen)}`
+      : 'Aguardando primeiro acesso';
+    const tag = active === 0
+      ? '<span class="tag tag-off">Parada</span>'
+      : ts === 'false' ? '<span class="tag tag-live">Real</span>' : '<span class="tag tag-test">Teste</span>';
+    const dots = MODULES.map((m) => {
+      const c = p.modules[m.id];
+      const cls = c.enabled ? `on ${c.settings.dryRun && !m.noTestMode ? 'test' : ''}` : '';
+      return `<i class="${cls}" title="${esc(m.name)}"></i>`;
+    }).join('');
+    return `
+      <div class="acct ${state.selected === k ? 'active' : ''} ${state.checked.has(k) ? 'checked' : ''}"
+           role="button" tabindex="0" data-key="${esc(k)}" aria-pressed="${state.selected === k}">
+        <span class="seal" data-check title="Selecionar para ações em lote">
+          <small>${esc(wp.prefix)}</small><b>${esc(wp.num || '—')}</b>
+          <span class="check">${icon('check')}</span>
+        </span>
+        <span class="acct-body">
+          <div class="acct-name">${esc(nick)}</div>
+          <div class="acct-meta">${esc(meta)}</div>
+          <div class="acct-dots">${dots}</div>
+        </span>
+        ${tag}
+      </div>`;
+  }).join('');
+}
+
+// ------------------------------------------------------------------
+// Render: main
+// ------------------------------------------------------------------
+function renderMain() {
+  const main = $('#main');
+  const keys = allKeys();
+  if (!state.selected || !state.profiles[state.selected]) state.selected = keys[0] || null;
+
+  if (!state.selected) {
+    main.innerHTML = `
+      <div class="empty reveal">
+        <div class="empty-inner">
+          <svg class="empty-mark" viewBox="0 0 48 48" fill="none"><use href="#i-crest"/></svg>
+          <div class="eyebrow">Sala de guerra</div>
+          <h1>Sua frota começa <em>aqui.</em></h1>
+          <p>Cadastre suas contas por mundo e nick, escolha o que cada uma deve automatizar e o script aplica tudo sozinho quando você abrir o jogo.</p>
+          <div class="empty-actions">
+            <button class="btn btn-ember" data-act="add-one" type="button">${icon('plus', 'sm')}Adicionar conta</button>
+            <button class="btn btn-ghost" data-act="bulk" type="button">${icon('stack', 'sm')}Adição em massa</button>
+            <button class="btn btn-ghost" data-act="import" type="button">${icon('up', 'sm')}Importar backup</button>
+          </div>
+        </div>
+      </div>
+      <div class="aside-inline" id="asideInline"></div>`;
+    renderAsideInline();
+    return;
+  }
+
+  const key = state.selected;
+  const { world, nick } = splitKey(key);
+  const p = state.profiles[key];
+  const ts = testState(p);
+
+  const groups = GROUPS.map((g, gi) => {
+    const mods = MODULES.filter((m) => m.group === g);
+    const on = mods.filter((m) => p.modules[m.id].enabled).length;
+    return `
+      <section class="group reveal" style="animation-delay:${60 + gi * 50}ms">
+        <div class="group-head">
+          <span class="group-num">${['I', 'II', 'III', 'IV'][gi]}.</span>
+          <h2 class="group-name">${g}</h2>
+          <span class="group-line"></span>
+          <span class="group-count" data-gcount="${g}">${on}/${mods.length} ativos</span>
+        </div>
+        <div class="tiles">${mods.map((m) => tileHTML(m, p.modules[m.id])).join('')}</div>
+      </section>`;
+  }).join('');
+
+  main.innerHTML = `
+    <section class="hero reveal">
+      <div class="hero-kicker"><span class="world">${esc(world.toUpperCase())}</span><span>·</span><span>Dossiê da conta</span></div>
+      <div class="hero-row">
+        <h1 class="hero-title">${esc(nick)}</h1>
+        <div class="hero-tools">
+          <button class="btn btn-ghost btn-sm" data-act="apply-model" type="button">${icon('bookmark', 'sm')}Aplicar modelo</button>
+          <button class="btn btn-ghost btn-sm" data-act="save-model" type="button">${icon('plus', 'sm')}Salvar como modelo</button>
+          <button class="btn btn-danger btn-sm" data-act="remove" type="button" title="Remover conta">${icon('trash', 'sm')}</button>
+        </div>
+      </div>
+      <div class="stats" id="heroStats">${statsHTML(key)}</div>
+      <div class="testband ${ts === 'false' ? 'live' : ''}" id="testband">${testbandHTML(ts)}</div>
+    </section>
+    ${groups}
+    <div class="aside-inline" id="asideInline"></div>`;
+  renderAsideInline();
+  paintRanges(main);
+}
+
+function statsHTML(key) {
+  const p = state.profiles[key];
+  const s = state.accounts[key];
+  const on = activeCount(p);
+  const pct = Math.round((on / MODULES.length) * 100);
+  return `
+    <div class="stat"><div class="k">Pontos</div><div class="v">${s ? fmt(s.points) : '—'}</div><div class="h">${s ? 'reportado pelo script' : 'abra o jogo nesta conta'}</div></div>
+    <div class="stat"><div class="k">Aldeias</div><div class="v">${s ? fmt(s.villages) : '—'}</div><div class="h">${s && s.village ? esc(`${s.village.name} (${s.village.x}|${s.village.y})`) : '—'}</div></div>
+    <div class="stat"><div class="k">Último sinal</div><div class="v">${s ? esc(ago(s.lastSeen)) : '—'}</div><div class="h">${s ? `script v${esc(s.version)}` : 'nunca conectada'}</div></div>
+    <div class="stat"><div class="k">Módulos ativos</div><div class="v">${on}<small> / ${MODULES.length}</small></div><div class="meter"><i style="width:${pct}%"></i></div></div>`;
+}
+
+function testbandHTML(ts) {
+  const text = ts === 'true'
+    ? ['Modo teste ligado', 'Os módulos só simulam: registram no console o que fariam, sem enviar nada ao jogo.']
+    : ts === 'false'
+      ? ['Modo real', 'Os módulos ativos agem de verdade no jogo. Use com delays humanos.']
+      : ['Modo misto', 'Alguns módulos estão em teste e outros em modo real.'];
+  return `
+    <svg class="ico lg" style="color:${ts === 'false' ? 'var(--jade)' : 'var(--ember)'}"><use href="#i-${ts === 'false' ? 'bolt' : 'flask'}"/></svg>
+    <div class="testband-text"><b>${text[0]}</b><span>${text[1]}</span></div>
+    <span class="eyebrow">Teste</span>
+    <button class="lever" role="switch" aria-checked="${ts}" data-act="test-toggle" aria-label="Modo teste"></button>`;
+}
+
+function tileHTML(m, cfg) {
+  const lbl = presetLabel(m, cfg);
+  const open = state.openFine.has(m.id);
+  const fields = m.fields.map((f) => fieldHTML(m, f, cfg.settings)).join('');
+  const fine = (m.fields.length || m.note) ? `
+    <div class="fine-wrap ${open ? 'open' : ''}">
+      <button class="fine-toggle" data-fine="${m.id}" type="button">${icon('chev', 'sm')}Ajustes finos</button>
+      <div class="fine-body">${fields}${m.note ? `<p class="note">${esc(m.note)}</p>` : ''}</div>
+    </div>` : '';
+  return `
+    <article class="tile ${cfg.enabled ? 'on' : ''}" data-mod="${m.id}">
+      <div class="tile-top">
+        <span class="tile-icon">${icon(m.icon)}</span>
+        <div class="tile-name"><h3>${esc(m.name)}</h3><p>${icon('pin', 'sm')}${esc(m.screen)}</p></div>
+        <button class="lever" role="switch" aria-checked="${cfg.enabled}" data-toggle="${m.id}" aria-label="Ligar ${esc(m.name)}"></button>
+      </div>
+      <p class="tile-desc">${esc(m.desc)}</p>
+      <button class="picker" data-preset="${m.id}" type="button">
+        <span class="pk-v"><b data-pk-title>${esc(lbl.title)}</b><span data-pk-sub>${esc(lbl.sub)}</span></span>
+        ${icon('chev', 'sm')}
+      </button>
+      ${fine}
+    </article>`;
+}
+
+function fieldHTML(m, f, s) {
+  const val = s[f.key];
+  if (f.type === 'range') {
+    const scale = f.scale || 1;
+    return `
+      <label class="fine">
+        <span class="fine-top"><span>${esc(f.label)}</span><output data-out="${m.id}.${f.key}">${rangeText(f, val)}</output></span>
+        <input type="range" min="${f.min / scale}" max="${f.max / scale}" step="${f.step / scale}" value="${val / scale}" data-range="${m.id}.${f.key}">
+      </label>`;
+  }
+  if (f.type === 'select') {
+    const opt = f.options.find((o) => o.value === val) || { label: val };
+    return `
+      <div class="fine">
+        <span>${esc(f.label)}</span>
+        <button class="picker" data-field-select="${m.id}.${f.key}" type="button"><span class="pk-v"><b>${esc(opt.label)}</b></span>${icon('chev', 'sm')}</button>
+      </div>`;
+  }
+  if (f.type === 'switch') {
+    return `
+      <div class="fine fine-row">
+        <span>${esc(f.label)}</span>
+        <button class="lever sm" role="switch" aria-checked="${!!val}" data-field-switch="${m.id}.${f.key}" aria-label="${esc(f.label)}"></button>
+      </div>`;
+  }
+  return `
+    <label class="fine">
+      <span>${esc(f.label)}</span>
+      <input class="field" type="text" value="${esc(val)}" placeholder="${esc(f.placeholder || '')}" data-field-text="${m.id}.${f.key}" spellcheck="false" autocomplete="off">
+    </label>`;
+}
+
+function rangeText(f, val) {
+  const scale = f.scale || 1;
+  const n = val / scale;
+  const shown = f.decimals ? n.toFixed(f.decimals).replace('.', ',') : fmt(Math.round(n));
+  return `${shown} ${f.unit}`;
+}
+
+function paintRanges(root) {
+  root.querySelectorAll('input[type=range]').forEach(paintRange);
+}
+function paintRange(el) {
+  const pct = ((el.value - el.min) / (el.max - el.min)) * 100;
+  el.style.setProperty('--p', `${pct}%`);
+}
+
+function refreshTile(modId) {
+  const key = state.selected;
+  const tile = document.querySelector(`.tile[data-mod="${modId}"]`);
+  if (!tile || !key) return;
+  const m = MOD[modId];
+  const cfg = state.profiles[key].modules[modId];
+  tile.classList.toggle('on', cfg.enabled);
+  tile.querySelector(`[data-toggle="${modId}"]`).setAttribute('aria-checked', String(cfg.enabled));
+  const lbl = presetLabel(m, cfg);
+  tile.querySelector('[data-pk-title]').textContent = lbl.title;
+  tile.querySelector('[data-pk-sub]').textContent = lbl.sub;
+}
+
+function refreshChrome() {
+  const key = state.selected;
+  if (!key) return;
+  const p = state.profiles[key];
+  const stats = $('#heroStats');
+  if (stats) stats.innerHTML = statsHTML(key);
+  const band = $('#testband');
+  if (band) {
+    const ts = testState(p);
+    band.classList.toggle('live', ts === 'false');
+    band.innerHTML = testbandHTML(ts);
+  }
+  GROUPS.forEach((g) => {
+    const el = document.querySelector(`[data-gcount="${g}"]`);
+    if (!el) return;
+    const mods = MODULES.filter((m) => m.group === g);
+    el.textContent = `${mods.filter((m) => p.modules[m.id].enabled).length}/${mods.length} ativos`;
+  });
+  renderRail();
+  renderAside();
+}
+
+// ------------------------------------------------------------------
+// Render: aside
+// ------------------------------------------------------------------
+function asideHTML() {
+  const keys = allKeys();
+  const withMods = keys.filter((k) => activeCount(state.profiles[k]) > 0).length;
+  const inTest = keys.filter((k) => activeCount(state.profiles[k]) > 0 && testState(state.profiles[k]) !== 'false').length;
+  const seen24 = keys.filter((k) => state.accounts[k] && Date.now() - state.accounts[k].lastSeen < 86400000).length;
+
+  const sync = bridge.connected
+    ? `
+      <div class="sync-hero"><span class="sync-orb on">${icon('link')}</span><div><b>Tampermonkey conectado</b><span>Script v${esc(bridge.version)} · tudo salvo direto nele</span></div></div>
+      <p class="note" style="margin-top:12px">Cada conta recebe a configuração na próxima vez que você abrir o jogo com ela.</p>`
+    : `
+      <div class="sync-hero"><span class="sync-orb">${icon('link')}</span><div><b>Só neste navegador</b><span>O script ainda não está lendo este painel</span></div></div>
+      <ol class="steps">
+        <li><span>Atualize o TW Suite no Tampermonkey para a versão <code>1.1.0</code> ou mais nova.</span></li>
+        <li><span>Nos detalhes da extensão Tampermonkey, ative <code>Permitir acesso a URLs de arquivo</code>.</span></li>
+        <li><span>Recarregue esta página.</span></li>
+      </ol>
+      <button class="btn btn-ghost btn-sm" data-act="sync-code" type="button" style="width:100%">${icon('key', 'sm')}Usar código de sincronização</button>`;
+
+  const models = allModels().map((md) => `
+    <div class="model">
+      <div class="model-body"><b>${esc(md.name)}</b><span>${esc(md.desc)}</span></div>
+      ${state.selected ? `<button class="btn btn-ghost btn-sm" data-model-apply="${md.id}" type="button">Aplicar</button>` : ''}
+      ${md.builtin ? '' : `<button class="icon-btn" style="height:32px;padding:0 8px" data-model-del="${md.id}" type="button" title="Excluir modelo">${icon('trash', 'sm')}</button>`}
+    </div>`).join('');
+
+  const log = state.log.length
+    ? `<ul class="log">${state.log.map((l) => `<li><time>${l.at.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</time><span>${esc(l.text)}</span></li>`).join('')}</ul>`
+    : '<p class="note">Nada por aqui ainda nesta sessão.</p>';
+
+  return `
+    <div class="card"><div class="card-head"><h4>Sincronização</h4></div>${sync}</div>
+    <div class="card">
+      <div class="card-head"><h4>Visão da frota</h4></div>
+      <div class="kv">
+        <div><b>${keys.length}</b><span>contas</span></div>
+        <div><b>${withMods}</b><span>com módulos</span></div>
+        <div><b>${inTest}</b><span>em teste</span></div>
+        <div><b>${seen24}</b><span>ativas em 24h</span></div>
+      </div>
+    </div>
+    <div class="card"><div class="card-head"><h4>Modelos</h4></div>${models}</div>
+    <div class="card"><div class="card-head"><h4>Diário</h4></div>${log}</div>`;
+}
+
+function renderAside() {
+  $('#aside').innerHTML = asideHTML();
+  renderAsideInline();
+}
+function renderAsideInline() {
+  const el = $('#asideInline');
+  if (el) el.innerHTML = asideHTML();
+}
+
+function renderBulkbar() {
+  const bar = $('#bulkbar');
+  const n = state.checked.size;
+  bar.classList.toggle('show', n > 0);
+  if (!n) return;
+  bar.innerHTML = `
+    <span class="n">${n} selecionada${n > 1 ? 's' : ''}</span>
+    <button class="btn btn-ghost btn-sm" data-bulk="test-on" type="button">${icon('flask', 'sm')}Modo teste</button>
+    <button class="btn btn-ghost btn-sm" data-bulk="test-off" type="button">${icon('bolt', 'sm')}Modo real</button>
+    <button class="btn btn-ghost btn-sm" data-bulk="model" type="button">${icon('bookmark', 'sm')}Aplicar modelo</button>
+    <span class="sep"></span>
+    <button class="btn btn-danger btn-sm" data-bulk="remove" type="button">${icon('trash', 'sm')}Remover</button>
+    <button class="icon-btn" data-bulk="clear" type="button" title="Limpar seleção">${icon('x', 'sm')}</button>`;
+}
+
+function renderAll() {
+  renderSync();
+  renderRail();
+  renderMain();
+  renderAside();
+  renderBulkbar();
+}
+
+// ------------------------------------------------------------------
+// Popover (select customizado)
+// ------------------------------------------------------------------
+const pop = { el: null, onPick: null, items: [], hl: -1, anchor: null };
+
+function openPop(anchor, items, current, onPick) {
+  closePop();
+  pop.el = $('#pop');
+  pop.anchor = anchor;
+  pop.onPick = onPick;
+  pop.items = items.filter((i) => !i.sep);
+  pop.hl = Math.max(0, pop.items.findIndex((i) => i.value === current));
+  pop.el.innerHTML = items.map((it) => it.sep ? '<div class="pop-sep"></div>' : `
+    <button class="pop-item ${it.value === current ? 'sel' : ''}" data-v="${esc(it.value)}" type="button" role="option" aria-selected="${it.value === current}">
+      <span class="pv"><b>${esc(it.label)}</b>${it.hint ? `<span>${esc(it.hint)}</span>` : ''}</span>
+      ${icon('check', 'sm tick')}
+    </button>`).join('');
+  const r = anchor.getBoundingClientRect();
+  pop.el.style.minWidth = `${Math.max(240, r.width)}px`;
+  pop.el.style.left = `${Math.min(r.left, window.innerWidth - Math.max(240, r.width) - 12)}px`;
+  pop.el.classList.add('show');
+  const h = pop.el.offsetHeight;
+  const below = r.bottom + 6 + h < window.innerHeight;
+  pop.el.style.top = `${below ? r.bottom + 6 : Math.max(8, r.top - h - 6)}px`;
+  highlightPop();
+}
+
+function highlightPop() {
+  if (!pop.el) return;
+  pop.el.querySelectorAll('.pop-item').forEach((b, i) => b.classList.toggle('hl', i === pop.hl));
+  const cur = pop.el.querySelectorAll('.pop-item')[pop.hl];
+  if (cur) cur.scrollIntoView({ block: 'nearest' });
+}
+
+function closePop() {
+  if (!pop.el) return;
+  pop.el.classList.remove('show');
+  pop.el = null;
+  pop.onPick = null;
+}
+
+document.addEventListener('click', (e) => {
+  const item = e.target.closest('.pop-item');
+  if (item && pop.el) {
+    const cb = pop.onPick;
+    const v = item.dataset.v;
+    closePop();
+    if (cb) cb(v);
+    return;
+  }
+  if (pop.el && !e.target.closest('#pop') && !(pop.anchor && pop.anchor.contains(e.target))) closePop();
+}, true);
+window.addEventListener('resize', closePop);
+document.addEventListener('scroll', (e) => { if (pop.el && !e.target.closest?.('#pop')) closePop(); }, true);
+
+function moduleOptions(m) {
+  const items = [{ value: 'off', label: 'Desligado', hint: 'Não roda nesta conta' }, { sep: true }];
+  if (!m.presets.length) {
+    items.push({ value: 'on', label: 'Ligado', hint: m.note || 'Usa a configuração atual' });
+  } else {
+    m.presets.forEach((pr) => items.push({ value: pr.id, label: pr.label, hint: m.hint({ ...m.defaults, ...pr.settings }) }));
+  }
+  return items;
+}
+
+// ------------------------------------------------------------------
+// Eventos: rail
+// ------------------------------------------------------------------
+$('#railList').addEventListener('click', (e) => {
+  const card = e.target.closest('.acct');
+  if (!card) return;
+  const key = card.dataset.key;
+  if (e.target.closest('[data-check]') || e.ctrlKey || e.metaKey) {
+    state.checked.has(key) ? state.checked.delete(key) : state.checked.add(key);
+    renderRail();
+    renderBulkbar();
+    return;
+  }
+  selectAccount(key);
+});
+$('#railList').addEventListener('keydown', (e) => {
+  const card = e.target.closest('.acct');
+  if (!card) return;
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectAccount(card.dataset.key); }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const sib = e.key === 'ArrowDown' ? card.nextElementSibling : card.previousElementSibling;
+    if (sib) sib.focus();
+  }
+});
+$('#railChips').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-filter]');
+  if (!chip) return;
+  state.filter = chip.dataset.filter;
+  renderRail();
+});
+$('#railSearch').addEventListener('input', (e) => {
+  state.query = e.target.value;
+  renderRail();
+});
+
+function selectAccount(key) {
+  state.selected = key;
+  persistLocal();
+  renderRail();
+  renderMain();
+  renderAside();
+  $('#main').scrollTop = 0;
+}
+
+// ------------------------------------------------------------------
+// Eventos: main
+// ------------------------------------------------------------------
+const main = $('#main');
+
+main.addEventListener('click', (e) => {
+  const key = state.selected;
+  const t = e.target;
+
+  const act = t.closest('[data-act]');
+  if (act) return handleAct(act.dataset.act, act);
+
+  if (!key) return;
+  const p = state.profiles[key];
+
+  const toggle = t.closest('[data-toggle]');
+  if (toggle) {
+    const id = toggle.dataset.toggle;
+    p.modules[id].enabled = !p.modules[id].enabled;
+    touch(key);
+    refreshTile(id);
+    refreshChrome();
+    return;
+  }
+
+  const preset = t.closest('[data-preset]');
+  if (preset) {
+    const m = MOD[preset.dataset.preset];
+    const cfg = p.modules[m.id];
+    openPop(preset, moduleOptions(m), presetOf(m, cfg), (v) => {
+      applyPreset(cfg, m, v);
+      touch(key);
+      rerenderTile(m.id);
+      refreshChrome();
+    });
+    return;
+  }
+
+  const fine = t.closest('[data-fine]');
+  if (fine) {
+    const id = fine.dataset.fine;
+    state.openFine.has(id) ? state.openFine.delete(id) : state.openFine.add(id);
+    fine.parentElement.classList.toggle('open');
+    return;
+  }
+
+  const sel = t.closest('[data-field-select]');
+  if (sel) {
+    const [id, fk] = sel.dataset.fieldSelect.split('.');
+    const f = MOD[id].fields.find((x) => x.key === fk);
+    const cfg = p.modules[id];
+    openPop(sel, f.options.map((o) => ({ value: o.value, label: o.label })), cfg.settings[fk], (v) => {
+      cfg.settings[fk] = v;
+      touch(key);
+      rerenderTile(id);
+      refreshChrome();
+    });
+    return;
+  }
+
+  const sw = t.closest('[data-field-switch]');
+  if (sw) {
+    const [id, fk] = sw.dataset.fieldSwitch.split('.');
+    const cfg = p.modules[id];
+    cfg.settings[fk] = !cfg.settings[fk];
+    sw.setAttribute('aria-checked', String(cfg.settings[fk]));
+    touch(key);
+    refreshTile(id);
+  }
+});
+
+main.addEventListener('input', (e) => {
+  const key = state.selected;
+  if (!key) return;
+  const r = e.target.closest('[data-range]');
+  if (r) {
+    const [id, fk] = r.dataset.range.split('.');
+    const f = MOD[id].fields.find((x) => x.key === fk);
+    const val = Math.round(Number(r.value) * (f.scale || 1));
+    state.profiles[key].modules[id].settings[fk] = val;
+    paintRange(r);
+    const out = main.querySelector(`[data-out="${id}.${fk}"]`);
+    if (out) out.textContent = rangeText(f, val);
+    refreshTile(id);
+    touch(key);
+    return;
+  }
+  const tx = e.target.closest('[data-field-text]');
+  if (tx) {
+    const [id, fk] = tx.dataset.fieldText.split('.');
+    state.profiles[key].modules[id].settings[fk] = tx.value.trim();
+    refreshTile(id);
+    touch(key);
+  }
+});
+
+function rerenderTile(id) {
+  const tile = document.querySelector(`.tile[data-mod="${id}"]`);
+  if (!tile) return;
+  tile.outerHTML = tileHTML(MOD[id], state.profiles[state.selected].modules[id]);
+  const fresh = document.querySelector(`.tile[data-mod="${id}"]`);
+  paintRanges(fresh);
+}
+
+function handleAct(act, el) {
+  const key = state.selected;
+  switch (act) {
+    case 'add-one': return openAddOne();
+    case 'bulk': return openBulk();
+    case 'import': return $('#importFile').click();
+    case 'sync-code': return openSyncCode();
+    case 'test-toggle': {
+      const ts = testState(state.profiles[key]);
+      setTestMode(key, ts !== 'true');
+      addLog(`${splitKey(key).nick}: modo ${ts !== 'true' ? 'teste' : 'real'}`);
+      refreshChrome();
+      MODULES.forEach((m) => refreshTile(m.id));
+      return;
+    }
+    case 'apply-model':
+      return openPop(el, allModels().map((md) => ({ value: md.id, label: md.name, hint: md.desc })), null, (id) => {
+        const md = allModels().find((x) => x.id === id);
+        applyModel(key, md);
+        addLog(`Modelo "${md.name}" aplicado em ${splitKey(key).nick}`);
+        toast(`Modelo "${md.name}" aplicado`);
+        renderMain();
+        refreshChrome();
+      });
+    case 'save-model': return openSaveModel();
+    case 'remove': return confirmRemove([key]);
+  }
+}
+
+// ------------------------------------------------------------------
+// Eventos: aside, bulk bar, topbar
+// ------------------------------------------------------------------
+function onAsideClick(e) {
+  const act = e.target.closest('[data-act]');
+  if (act) return handleAct(act.dataset.act, act);
+  const ap = e.target.closest('[data-model-apply]');
+  if (ap && state.selected) {
+    const md = allModels().find((x) => x.id === ap.dataset.modelApply);
+    applyModel(state.selected, md);
+    addLog(`Modelo "${md.name}" aplicado em ${splitKey(state.selected).nick}`);
+    toast(`Modelo "${md.name}" aplicado`);
+    renderMain();
+    refreshChrome();
+    return;
+  }
+  const del = e.target.closest('[data-model-del]');
+  if (del) {
+    state.models = state.models.filter((x) => x.id !== del.dataset.modelDel);
+    persistLocal();
+    renderAside();
+    toast('Modelo excluído');
+  }
+}
+$('#aside').addEventListener('click', onAsideClick);
+main.addEventListener('click', (e) => { if (e.target.closest('#asideInline')) onAsideClick(e); });
+
+$('#bulkbar').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-bulk]');
+  if (!b) return;
+  const keys = [...state.checked];
+  switch (b.dataset.bulk) {
+    case 'clear':
+      state.checked.clear();
+      break;
+    case 'test-on':
+    case 'test-off': {
+      const on = b.dataset.bulk === 'test-on';
+      keys.forEach((k) => setTestMode(k, on));
+      addLog(`${keys.length} conta(s) em modo ${on ? 'teste' : 'real'}`);
+      toast(`${keys.length} conta(s) em modo ${on ? 'teste' : 'real'}`);
+      renderMain();
+      break;
+    }
+    case 'model':
+      return openPop(b, allModels().map((md) => ({ value: md.id, label: md.name, hint: md.desc })), null, (id) => {
+        const md = allModels().find((x) => x.id === id);
+        keys.forEach((k) => applyModel(k, md));
+        addLog(`Modelo "${md.name}" aplicado em ${keys.length} conta(s)`);
+        toast(`Modelo aplicado em ${keys.length} conta(s)`);
+        renderAll();
+      });
+    case 'remove':
+      return confirmRemove(keys);
+  }
+  renderRail();
+  renderAside();
+  renderBulkbar();
+});
+
+$('#btnAddOne').addEventListener('click', openAddOne);
+$('#btnBulk').addEventListener('click', openBulk);
+$('#btnExport').addEventListener('click', exportBackup);
+$('#btnImport').addEventListener('click', () => $('#importFile').click());
+$('#importFile').addEventListener('change', importBackup);
+$('#openPalette').addEventListener('click', openPalette);
+
+// ------------------------------------------------------------------
+// Modais
+// ------------------------------------------------------------------
+const scrim = $('#scrim');
+const modal = $('#modal');
+let modalCleanup = null;
+let lastFocus = null;
+
+function openModal(html, { narrow = false, palette = false, onMount } = {}) {
+  closePop();
+  lastFocus = document.activeElement;
+  modal.className = `modal ${narrow ? 'narrow' : ''} ${palette ? 'palette' : ''}`;
+  modal.innerHTML = html;
+  scrim.classList.add('show');
+  if (onMount) modalCleanup = onMount(modal) || null;
+  const focusable = modal.querySelector('[autofocus], input, textarea, button');
+  if (focusable) setTimeout(() => focusable.focus(), 30);
+}
+
+function closeModal() {
+  scrim.classList.remove('show');
+  if (typeof modalCleanup === 'function') modalCleanup();
+  modalCleanup = null;
+  if (lastFocus && lastFocus.focus) lastFocus.focus();
+}
+
+scrim.addEventListener('mousedown', (e) => { if (e.target === scrim) closeModal(); });
+modal.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeModal(); });
+
+function modalHead(iconName, title, sub) {
+  return `
+    <div class="modal-head">
+      <span class="modal-badge">${icon(iconName, 'lg')}</span>
+      <div><h3>${title}</h3>${sub ? `<p>${sub}</p>` : ''}</div>
+      <button class="x" data-close type="button" aria-label="Fechar">${icon('x')}</button>
+    </div>`;
+}
+
+// ---- Nova conta ----
+function openAddOne() {
+  let modelId = 'm-seguro';
+  openModal(`
+    ${modalHead('plus', 'Nova conta', 'Identifique a conta pelo mundo e pelo nick exatos do jogo.')}
+    <div class="modal-body">
+      <div class="row2">
+        <label><span class="field-label">Mundo</span><input class="field mono" id="f-world" placeholder="br144" autocomplete="off" spellcheck="false"></label>
+        <label><span class="field-label">Nick</span><input class="field" id="f-nick" placeholder="Seu nick no jogo" autocomplete="off" spellcheck="false"></label>
+      </div>
+      <div style="margin-top:14px">
+        <span class="field-label">Começar com</span>
+        <button class="picker" id="f-model" type="button"><span class="pk-v"><b></b><span></span></span>${icon('chev', 'sm')}</button>
+      </div>
+      <div class="callout" style="margin:16px 0 0">${icon('flask')}<div>Contas novas começam em <b>modo teste</b>. Quando estiver tudo certo, desligue o teste no dossiê da conta.</div></div>
+    </div>
+    <div class="modal-foot">
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" data-close type="button">Cancelar</button>
+      <button class="btn btn-ember" id="f-save" type="button">${icon('plus', 'sm')}Adicionar</button>
+    </div>`, {
+    narrow: true,
+    onMount(root) {
+      const paint = () => {
+        const md = modelId === 'none' ? { name: 'Tudo desligado', desc: 'Configure módulo por módulo' } : allModels().find((x) => x.id === modelId);
+        root.querySelector('#f-model b').textContent = md.name;
+        root.querySelector('#f-model .pk-v span').textContent = md.desc;
+      };
+      paint();
+      root.querySelector('#f-model').addEventListener('click', (e) => {
+        const items = [{ value: 'none', label: 'Tudo desligado', hint: 'Configure módulo por módulo' }, { sep: true },
+          ...allModels().map((md) => ({ value: md.id, label: md.name, hint: md.desc }))];
+        openPop(e.currentTarget, items, modelId, (v) => { modelId = v; paint(); });
+      });
+      const save = () => {
+        const world = root.querySelector('#f-world').value.trim();
+        const nick = root.querySelector('#f-nick').value.trim();
+        if (!isWorld(world)) return toast('Mundo inválido — use o formato br144', 'err');
+        if (!nick) return toast('Informe o nick', 'err');
+        const key = accountKey(world, nick);
+        if (state.profiles[key]) return toast('Essa conta já existe', 'err');
+        state.profiles[key] = newProfile();
+        if (modelId !== 'none') applyModel(key, allModels().find((x) => x.id === modelId));
+        touch(key);
+        state.selected = key;
+        addLog(`Conta ${world.toLowerCase()} · ${nick} adicionada`);
+        toast('Conta adicionada');
+        closeModal();
+        renderAll();
+      };
+      root.querySelector('#f-save').addEventListener('click', save);
+      root.querySelectorAll('input').forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); }));
+    },
+  });
+}
+
+// ---- Adição em massa ----
+const WORLD_RE = /^[a-z]{2,3}(s|p|c)?\d{1,4}$/i;
+const isWorld = (s) => WORLD_RE.test(String(s || '').trim());
+
+function parseAccounts(text, defaultWorld) {
+  const seen = new Set();
+  let passwords = 0;
+  const rows = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((line) => {
+    let world = '';
+    let nick = '';
+    const parts = line.split('|').map((s) => s.trim());
+    if (parts.length === 1) {
+      const c = line.indexOf(':');
+      if (c > 0 && isWorld(line.slice(0, c))) {
+        world = line.slice(0, c);
+        nick = line.slice(c + 1).trim();
+      } else {
+        nick = line;
+        world = defaultWorld;
+      }
+    } else if (parts.length === 2) {
+      if (isWorld(parts[1])) { nick = parts[0]; world = parts[1]; }
+      else if (isWorld(parts[0])) { world = parts[0]; nick = parts[1]; }
+      else { nick = parts[0]; world = defaultWorld; passwords++; }
+    } else {
+      nick = parts[0];
+      const last = parts[parts.length - 1];
+      world = isWorld(last) ? last : defaultWorld;
+      passwords++;
+    }
+    const row = { raw: line, world: String(world || '').toLowerCase(), nick };
+    if (!row.nick) row.error = 'nick vazio';
+    else if (!isWorld(row.world)) row.error = 'mundo não identificado';
+    else {
+      const key = accountKey(row.world, row.nick);
+      if (seen.has(key)) row.error = 'repetida na lista';
+      else if (state.profiles[key]) row.exists = true;
+      seen.add(key);
+    }
+    return row;
+  });
+  return { rows, passwords };
+}
+
+function openBulk() {
+  const b = {
+    step: 1,
+    text: '',
+    world: (state.selected && splitKey(state.selected).world) || 'br144',
+    plan: Object.fromEntries(PLAN_MODULES.map((id) => [id, 'off'])),
+    base: null,
+    test: true,
+  };
+
+  const validRows = () => parseAccounts(b.text, b.world).rows.filter((r) => !r.error && !r.exists);
+
+  function stepper() {
+    return `
+      <div class="stepper">
+        <span class="step ${b.step === 1 ? 'cur' : 'done'}"><i>${b.step === 1 ? '1' : icon('check', 'sm')}</i>Colar contas</span>
+        <span class="step-line ${b.step === 2 ? 'done' : ''}"></span>
+        <span class="step ${b.step === 2 ? 'cur' : ''}"><i>2</i>Configurar scripts</span>
+      </div>`;
+  }
+
+  function parseHTML() {
+    const { rows, passwords } = parseAccounts(b.text, b.world);
+    if (!rows.length) return '';
+    const warn = passwords ? `<div class="callout warn" style="margin:14px 0 0">${icon('key')}<div><b>Senhas detectadas e descartadas.</b> O TW Suite roda no seu navegador, já logado — ele nunca precisa nem guarda a sua senha.</div></div>` : '';
+    return `${warn}<div class="parse">${rows.map((r) => `
+      <div class="parse-row ${r.error ? 'bad' : ''}">
+        <span class="w">${esc(r.world || '???')}</span>
+        <span>${esc(r.nick || r.raw)}</span>
+        ${r.error ? `<span class="tag tag-off">${esc(r.error)}</span>` : r.exists ? '<span class="tag tag-off">já existe</span>' : '<span class="tag tag-live">nova</span>'}
+      </div>`).join('')}</div>`;
+  }
+
+  function planHTML() {
+    return PLAN_MODULES.map((id) => {
+      const m = MOD[id];
+      const v = b.plan[id];
+      const label = v === 'off' ? 'Desligado' : v === 'model' ? 'Do modelo' : (m.presets.find((p) => p.id === v) || {}).label;
+      return `
+        <div class="plan-card ${v !== 'off' ? 'on' : ''}">
+          <div class="plan-card-top"><span class="tile-icon">${icon(m.icon, 'sm')}</span><div><b>${esc(m.name)}</b><span>${esc(m.screen)}</span></div></div>
+          <button class="picker" data-plan="${id}" type="button"><span class="pk-v"><b>${esc(label)}</b></span>${icon('chev', 'sm')}</button>
+        </div>`;
+    }).join('');
+  }
+
+  function summary() {
+    const n = validRows().length;
+    const s = PLAN_MODULES.filter((id) => b.plan[id] !== 'off').length;
+    return `${icon('check', 'sm')}<span><b>${n}</b> conta${n === 1 ? '' : 's'} com <b>${s}</b> script${s === 1 ? '' : 's'}</span>`;
+  }
+
+  function render() {
+    const baseModel = b.base ? allModels().find((x) => x.id === b.base) : null;
+    const body = b.step === 1 ? `
+      <div class="callout">${icon('spark')}<div><b>Adição inteligente.</b> Uma conta por linha: <code>nick|mundo</code>, <code>mundo:nick</code> ou só o <code>nick</code> (usa o mundo padrão).</div></div>
+      <div class="row2" style="grid-template-columns: 1fr 160px; align-items:end">
+        <label><span class="field-label">Contas</span></label>
+        <label><span class="field-label">Mundo padrão</span></label>
+      </div>
+      <div class="row2" style="grid-template-columns: 1fr 160px; align-items:start">
+        <textarea class="field" id="b-text" rows="6" placeholder="Agostinho|br144&#10;br144:Carrara&#10;OutroNick" spellcheck="false">${esc(b.text)}</textarea>
+        <input class="field mono" id="b-world" value="${esc(b.world)}" autocomplete="off" spellcheck="false">
+      </div>
+      <div id="b-parse">${parseHTML()}</div>` : `
+      <div class="callout">${icon('bolt')}<div><b>Automatize suas contas.</b> O que escolher aqui vale para todas as contas novas da lista.</div></div>
+      <div style="display:flex; gap:12px; align-items:end; flex-wrap:wrap; margin-bottom:16px">
+        <div style="flex:1; min-width:220px">
+          <span class="field-label">Partir de um modelo</span>
+          <button class="picker" id="b-base" type="button"><span class="pk-v"><b>${esc(baseModel ? baseModel.name : 'Nenhum')}</b><span>${esc(baseModel ? baseModel.desc : 'Escolha módulo por módulo abaixo')}</span></span>${icon('chev', 'sm')}</button>
+        </div>
+        <div class="fine fine-row" style="height:52px; padding:0 14px; border:1px solid var(--line-2); border-radius:10px; gap:14px">
+          <span>Modo teste</span>
+          <button class="lever sm" role="switch" aria-checked="${b.test}" id="b-test" aria-label="Modo teste"></button>
+        </div>
+      </div>
+      <div class="plan">${planHTML()}</div>`;
+
+    modal.querySelector('.modal-body').innerHTML = body;
+    modal.querySelector('#b-stepper').innerHTML = stepper();
+    modal.querySelector('#b-summary').innerHTML = summary();
+    modal.querySelector('#b-back').hidden = b.step === 1;
+    const next = modal.querySelector('#b-next');
+    next.innerHTML = b.step === 1 ? `Continuar${icon('chev', 'sm')}` : `${icon('plus', 'sm')}Adicionar (${validRows().length})`;
+    next.querySelector('.ico').style.transform = b.step === 1 ? 'rotate(-90deg)' : '';
+
+    if (b.step === 1) {
+      const ta = modal.querySelector('#b-text');
+      ta.addEventListener('input', () => {
+        b.text = ta.value;
+        modal.querySelector('#b-parse').innerHTML = parseHTML();
+        modal.querySelector('#b-summary').innerHTML = summary();
+      });
+      modal.querySelector('#b-world').addEventListener('input', (e) => {
+        b.world = e.target.value.trim().toLowerCase();
+        modal.querySelector('#b-parse').innerHTML = parseHTML();
+        modal.querySelector('#b-summary').innerHTML = summary();
+      });
+    } else {
+      modal.querySelector('#b-test').addEventListener('click', (e) => {
+        b.test = !b.test;
+        e.currentTarget.setAttribute('aria-checked', String(b.test));
+      });
+      modal.querySelector('#b-base').addEventListener('click', (e) => {
+        const items = [{ value: '', label: 'Nenhum', hint: 'Escolha módulo por módulo' }, { sep: true },
+          ...allModels().map((md) => ({ value: md.id, label: md.name, hint: md.desc }))];
+        openPop(e.currentTarget, items, b.base || '', (v) => {
+          b.base = v || null;
+          const md = b.base ? allModels().find((x) => x.id === b.base) : null;
+          PLAN_MODULES.forEach((id) => {
+            const src = md && md.modules[id];
+            if (!src || !src.enabled) { b.plan[id] = 'off'; return; }
+            const fake = { enabled: true, settings: { ...MOD[id].defaults, ...src.settings } };
+            const pid = presetOf(MOD[id], fake);
+            b.plan[id] = pid === 'custom' || pid === 'on' ? 'model' : pid;
+          });
+          render();
+        });
+      });
+      modal.querySelectorAll('[data-plan]').forEach((btn) => btn.addEventListener('click', (e) => {
+        const id = btn.dataset.plan;
+        const items = moduleOptions(MOD[id]);
+        if (b.plan[id] === 'model') items.splice(1, 0, { value: 'model', label: 'Do modelo', hint: 'Mantém a configuração do modelo' });
+        openPop(e.currentTarget, items, b.plan[id], (v) => { b.plan[id] = v; render(); });
+      }));
+    }
+  }
+
+  function create() {
+    const rows = validRows();
+    if (!rows.length) return toast('Nenhuma conta nova para adicionar', 'err');
+    const md = b.base ? allModels().find((x) => x.id === b.base) : null;
+    rows.forEach((r) => {
+      const key = accountKey(r.world, r.nick);
+      state.profiles[key] = newProfile();
+      if (md) applyModel(key, md);
+      const p = state.profiles[key];
+      PLAN_MODULES.forEach((id) => {
+        if (b.plan[id] !== 'model') applyPreset(p.modules[id], MOD[id], b.plan[id]);
+      });
+      setTestMode(key, b.test);
+    });
+    state.selected = accountKey(rows[0].world, rows[0].nick);
+    addLog(`${rows.length} conta(s) adicionada(s) em massa`);
+    toast(`${rows.length} conta(s) adicionada(s)`);
+    closeModal();
+    renderAll();
+  }
+
+  openModal(`
+    ${modalHead('stack', 'Adicionar contas em massa', 'Cole a lista, revise e escolha o que cada conta vai automatizar.')}
+    <div id="b-stepper"></div>
+    <div class="modal-body"></div>
+    <div class="modal-foot">
+      <span class="foot-note" id="b-summary"></span>
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" id="b-back" type="button">Voltar</button>
+      <button class="btn btn-ember" id="b-next" type="button"></button>
+    </div>`, {
+    onMount(root) {
+      root.querySelector('#b-back').addEventListener('click', () => { b.step = 1; render(); });
+      root.querySelector('#b-next').addEventListener('click', () => {
+        if (b.step === 1) {
+          if (!validRows().length) return toast('Cole pelo menos uma conta nova válida', 'err');
+          b.step = 2;
+          render();
+        } else {
+          create();
         }
+      });
+      render();
+    },
+  });
+}
 
-        function renderModuleList() {
-            const list = document.getElementById('moduleList');
-            list.innerHTML = MODULES.map(m => `
-                <li class="module-item" onclick="selectModule('${m.id}')">
-                    <span class="module-status" id="status-${m.id}"></span>
-                    ${m.name}
-                </li>
-            `).join('');
-            selectModule(MODULES[0].id);
+// ---- Salvar como modelo ----
+function openSaveModel() {
+  const key = state.selected;
+  openModal(`
+    ${modalHead('bookmark', 'Salvar como modelo', 'Os módulos ligados desta conta viram uma receita reutilizável.')}
+    <div class="modal-body">
+      <label><span class="field-label">Nome do modelo</span><input class="field" id="m-name" placeholder="Ex.: Farm noturno" autocomplete="off"></label>
+      <p class="note" style="margin-top:10px">O modo teste e o webhook do Discord não entram no modelo.</p>
+    </div>
+    <div class="modal-foot"><span class="spacer"></span>
+      <button class="btn btn-ghost" data-close type="button">Cancelar</button>
+      <button class="btn btn-ember" id="m-save" type="button">Salvar modelo</button>
+    </div>`, {
+    narrow: true,
+    onMount(root) {
+      const save = () => {
+        const name = root.querySelector('#m-name').value.trim();
+        if (!name) return toast('Dê um nome ao modelo', 'err');
+        const md = modelFromProfile(name, state.profiles[key]);
+        if (!Object.keys(md.modules).length) return toast('Ligue pelo menos um módulo antes', 'err');
+        state.models.push(md);
+        persistLocal();
+        addLog(`Modelo "${name}" criado`);
+        toast('Modelo salvo');
+        closeModal();
+        renderAside();
+      };
+      root.querySelector('#m-save').addEventListener('click', save);
+      root.querySelector('#m-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+    },
+  });
+}
+
+// ---- Remover ----
+function confirmRemove(keys) {
+  const names = keys.map((k) => splitKey(k).nick);
+  openModal(`
+    ${modalHead('trash', keys.length > 1 ? `Remover ${keys.length} contas?` : 'Remover conta?', esc(names.slice(0, 4).join(', ') + (names.length > 4 ? '…' : '')))}
+    <div class="modal-body"><p class="note">O perfil sai do painel${bridge.connected ? ' e do Tampermonkey' : ''}. As configurações já aplicadas no jogo continuam valendo até você mudá-las lá.</p></div>
+    <div class="modal-foot"><span class="spacer"></span>
+      <button class="btn btn-ghost" data-close type="button">Cancelar</button>
+      <button class="btn btn-danger" id="r-ok" type="button">${icon('trash', 'sm')}Remover</button>
+    </div>`, {
+    narrow: true,
+    onMount(root) {
+      root.querySelector('#r-ok').addEventListener('click', async () => {
+        keys.forEach((k) => {
+          delete state.profiles[k];
+          delete state.accounts[k];
+          state.checked.delete(k);
+        });
+        if (keys.includes(state.selected)) state.selected = null;
+        if (bridge.connected) {
+          for (const k of keys) { try { await bridgeCall('forgetAccount', { key: k }); } catch { /* segue */ } }
         }
+        scheduleSave();
+        addLog(`${keys.length} conta(s) removida(s)`);
+        toast(keys.length > 1 ? 'Contas removidas' : 'Conta removida');
+        closeModal();
+        renderAll();
+      });
+    },
+  });
+}
 
-        function renderModuleEditors() {
-            const container = document.getElementById('moduleEditors');
-            container.innerHTML = MODULES.map(m => `
-                <div class="module-editor" id="editor-${m.id}">
-                    <h2>${m.name}</h2>
-                    <p style="margin-bottom: 20px; color: #666;">${m.desc}</p>
+// ---- Código de sincronização ----
+function openSyncCode() {
+  const code = 'TWS1:' + btoa(unescape(encodeURIComponent(JSON.stringify({ v: 1, profiles: state.profiles }))));
+  openModal(`
+    ${modalHead('key', 'Código de sincronização', 'Para quando o Tampermonkey não consegue ler este arquivo diretamente.')}
+    <div class="modal-body">
+      <ol class="steps" style="margin-top:0">
+        <li><span>Copie o código abaixo.</span></li>
+        <li><span>No jogo, abra o painel <code>TW Suite</code> e clique em <code>Importar código do dashboard</code>.</span></li>
+        <li><span>Cole e recarregue a página do jogo.</span></li>
+      </ol>
+      <div class="card" style="max-height:160px; overflow:auto"><div class="codebox">${esc(code)}</div></div>
+      <p class="note" style="margin-top:10px">${Object.keys(state.profiles).length} perfil(is) · o código inclui webhooks do Discord, não compartilhe.</p>
+    </div>
+    <div class="modal-foot"><span class="spacer"></span>
+      <button class="btn btn-ghost" data-close type="button">Fechar</button>
+      <button class="btn btn-ember" id="c-copy" type="button">${icon('copy', 'sm')}Copiar código</button>
+    </div>`, {
+    onMount(root) {
+      root.querySelector('#c-copy').addEventListener('click', () => {
+        copyText(code).then(() => toast('Código copiado')).catch(() => toast('Não foi possível copiar', 'err'));
+      });
+    },
+  });
+}
 
-                    <div class="settings-group">
-                        <label>
-                            <div class="toggle-switch">
-                                <input type="checkbox" id="enabled-${m.id}" onchange="updateConfig()">
-                                <span>Módulo Habilitado</span>
-                            </div>
-                        </label>
-                    </div>
+// ---- Backup ----
+function exportBackup() {
+  const data = { kind: 'tw-suite-backup', v: 2, exportedAt: new Date().toISOString(), profiles: state.profiles, models: state.models };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `tw-suite-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  addLog('Backup exportado');
+  toast('Backup exportado');
+}
 
-                    <div class="settings-group">
-                        <label>Configurações (JSON)</label>
-                        <textarea id="config-${m.id}" onchange="updateConfig()"></textarea>
-                    </div>
-
-                    <div class="button-group">
-                        <button class="btn-primary" onclick="saveConfig()">💾 Salvar</button>
-                        <button class="btn-secondary" onclick="resetToDefaults('${m.id}')">🔄 Restaurar Padrão</button>
-                    </div>
-                </div>
-            `).join('');
+function importBackup(e) {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      let count = 0;
+      if (data.kind === 'tw-suite-backup') {
+        for (const [k, p] of Object.entries(data.profiles || {})) {
+          state.profiles[k] = { ...p, updatedAt: Date.now() };
+          normalizeProfile(k);
+          count++;
         }
-
-        function selectModule(moduleId) {
-            document.querySelectorAll('.module-item').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('.module-editor').forEach(el => el.classList.remove('active'));
-            document.querySelector(`.module-item:has-selector([onclick*="${moduleId}"])`);
-            event?.target?.closest('.module-item').classList.add('active');
-            document.getElementById(`editor-${moduleId}`).classList.add('active');
-            loadModuleConfig(moduleId);
+        const ids = new Set(state.models.map((m) => m.id));
+        (data.models || []).forEach((m) => { if (!ids.has(m.id)) state.models.push(m); });
+      } else if (data.account && data.config) {
+        state.profiles[accountKey(data.account.server, data.account.nick)] = profileFromLegacy(data.config);
+        count = 1;
+      } else if (data.accounts) {
+        for (const [k, cfg] of Object.entries(data.accounts)) {
+          const { world, nick } = splitKey(k);
+          state.profiles[accountKey(world, nick)] = profileFromLegacy(cfg);
+          count++;
         }
+      } else {
+        throw new Error('formato não reconhecido');
+      }
+      scheduleSave();
+      addLog(`${count} perfil(is) importado(s)`);
+      toast(`${count} perfil(is) importado(s)`);
+      renderAll();
+    } catch (err) {
+      toast(`Falha ao importar: ${err.message}`, 'err');
+    }
+  };
+  reader.readAsText(file);
+}
 
-        function loadAccount() {
-            const server = document.getElementById('serverInput').value || 'br144';
-            const nick = document.getElementById('nickInput').value || 'Player';
-            currentAccount = { server, nick };
-            loadConfig();
-            updateStatus();
-            showAlert(`Conta selecionada: ${server} - ${nick}`, 'success');
-        }
+// ---- Paleta de comandos ----
+function openPalette() {
+  const commands = () => {
+    const list = [
+      { sec: 'Ações', label: 'Nova conta', icon: 'plus', run: openAddOne },
+      { sec: 'Ações', label: 'Adicionar contas em massa', icon: 'stack', run: openBulk },
+      { sec: 'Ações', label: 'Código de sincronização', icon: 'key', run: openSyncCode },
+      { sec: 'Ações', label: 'Exportar backup', icon: 'down', run: exportBackup },
+      { sec: 'Ações', label: 'Importar backup', icon: 'up', run: () => $('#importFile').click() },
+    ];
+    if (state.selected) {
+      const nick = splitKey(state.selected).nick;
+      const ts = testState(state.profiles[state.selected]);
+      list.push({ sec: 'Ações', label: ts === 'true' ? `Mudar ${nick} para modo real` : `Colocar ${nick} em modo teste`, icon: ts === 'true' ? 'bolt' : 'flask', run: () => handleAct('test-toggle') });
+      list.push({ sec: 'Ações', label: `Salvar ${nick} como modelo`, icon: 'bookmark', run: openSaveModel });
+    }
+    allKeys().forEach((k) => {
+      const { world, nick } = splitKey(k);
+      list.push({ sec: 'Contas', label: nick, meta: world, icon: 'pin', run: () => selectAccount(k) });
+    });
+    return list;
+  };
 
-        function newAccount() {
-            const server = prompt('Servidor (ex: br144):', 'br144');
-            const nick = prompt('Nick (ex: Player):', '');
-            if (server && nick) {
-                document.getElementById('serverInput').value = server;
-                document.getElementById('nickInput').value = nick;
-                config = {};
-                MODULES.forEach(m => {
-                    config[m.id] = { enabled: false };
-                });
-                loadAccount();
-                showAlert(`Nova conta criada: ${server} - ${nick}`, 'success');
-            }
-        }
+  let hl = 0;
+  let items = [];
 
-        function loadConfig() {
-            const key = `tw-suite-config:${currentAccount.server}:${currentAccount.nick}`;
-            const saved = localStorage.getItem(key);
-            config = saved ? JSON.parse(saved) : {};
-            MODULES.forEach(m => {
-                if (!config[m.id]) {
-                    config[m.id] = { enabled: false };
-                }
-            });
-            updateEditors();
-        }
+  openModal(`
+    <div class="palette-input">${icon('search')}<input id="p-q" placeholder="Buscar conta ou comando…" autocomplete="off" spellcheck="false"><kbd>Esc</kbd></div>
+    <div class="palette-list" id="p-list"></div>`, {
+    palette: true,
+    onMount(root) {
+      const q = root.querySelector('#p-q');
+      const listEl = root.querySelector('#p-list');
+      const draw = () => {
+        const term = q.value.trim().toLowerCase();
+        items = commands().filter((c) => !term || `${c.label} ${c.meta || ''}`.toLowerCase().includes(term));
+        hl = Math.min(hl, Math.max(0, items.length - 1));
+        let sec = '';
+        listEl.innerHTML = items.length ? items.map((c, i) => {
+          const head = c.sec !== sec ? `<div class="palette-sec">${c.sec}</div>` : '';
+          sec = c.sec;
+          return `${head}<button class="palette-item ${i === hl ? 'hl' : ''}" data-i="${i}" type="button">${icon(c.icon, 'sm')}<span>${esc(c.label)}</span>${c.meta ? `<small>${esc(c.meta)}</small>` : ''}</button>`;
+        }).join('') : '<div class="rail-empty">Nada encontrado.</div>';
+        const cur = listEl.querySelector('.hl');
+        if (cur) cur.scrollIntoView({ block: 'nearest' });
+      };
+      const run = (i) => {
+        const c = items[i];
+        if (!c) return;
+        closeModal();
+        setTimeout(c.run, 40);
+      };
+      q.addEventListener('input', () => { hl = 0; draw(); });
+      q.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); hl = Math.min(items.length - 1, hl + 1); draw(); }
+        if (e.key === 'ArrowUp') { e.preventDefault(); hl = Math.max(0, hl - 1); draw(); }
+        if (e.key === 'Enter') { e.preventDefault(); run(hl); }
+      });
+      listEl.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-i]');
+        if (b) run(Number(b.dataset.i));
+      });
+      draw();
+    },
+  });
+}
 
-        function updateEditors() {
-            MODULES.forEach(m => {
-                const enabled = document.getElementById(`enabled-${m.id}`);
-                const configTA = document.getElementById(`config-${m.id}`);
-                enabled.checked = config[m.id]?.enabled || false;
-                configTA.value = JSON.stringify(config[m.id], null, 2);
-            });
-        }
+// ------------------------------------------------------------------
+// Atalhos globais
+// ------------------------------------------------------------------
+document.addEventListener('keydown', (e) => {
+  if (pop.el) {
+    const n = pop.items.length;
+    if (e.key === 'Escape') { e.preventDefault(); closePop(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); pop.hl = (pop.hl + 1) % n; highlightPop(); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); pop.hl = (pop.hl - 1 + n) % n; highlightPop(); return; }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const it = pop.items[pop.hl];
+      const cb = pop.onPick;
+      closePop();
+      if (it && cb) cb(it.value);
+      return;
+    }
+  }
+  if (e.key === 'Escape' && scrim.classList.contains('show')) { closeModal(); return; }
+  const typing = /INPUT|TEXTAREA/.test(document.activeElement.tagName);
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    if (!scrim.classList.contains('show')) openPalette();
+    return;
+  }
+  if (e.key === '/' && !typing && !scrim.classList.contains('show')) {
+    e.preventDefault();
+    $('#railSearch').focus();
+  }
+});
 
-        function updateConfig() {
-            // Atualizar ao vivo, sem salvar ainda
-        }
-
-        function loadModuleConfig(moduleId) {
-            if (!config[moduleId]) {
-                config[moduleId] = { enabled: false };
-            }
-            document.getElementById(`enabled-${moduleId}`).checked = config[moduleId].enabled;
-            document.getElementById(`config-${moduleId}`).value = JSON.stringify(config[moduleId], null, 2);
-        }
-
-        function saveConfig() {
-            try {
-                MODULES.forEach(m => {
-                    const enabled = document.getElementById(`enabled-${m.id}`).checked;
-                    const configJSON = document.getElementById(`config-${m.id}`).value;
-                    config[m.id] = JSON.parse(configJSON);
-                    config[m.id].enabled = enabled;
-                });
-
-                const key = `tw-suite-config:${currentAccount.server}:${currentAccount.nick}`;
-                localStorage.setItem(key, JSON.stringify(config));
-                updateStatus();
-                showAlert('Configuração salva com sucesso!', 'success');
-            } catch (e) {
-                showAlert(`Erro ao salvar: ${e.message}`, 'error');
-            }
-        }
-
-        function updateStatus() {
-            MODULES.forEach(m => {
-                const status = document.getElementById(`status-${m.id}`);
-                if (config[m.id]?.enabled) {
-                    status.classList.add('enabled');
-                } else {
-                    status.classList.remove('enabled');
-                }
-            });
-        }
-
-        function resetToDefaults(moduleId) {
-            if (confirm('Restaurar configurações padrão deste módulo?')) {
-                config[moduleId] = { enabled: false };
-                loadModuleConfig(moduleId);
-                saveConfig();
-                showAlert('Padrões restaurados!', 'success');
-            }
-        }
-
-        function exportConfig() {
-            const key = `tw-suite-config:${currentAccount.server}:${currentAccount.nick}`;
-            const data = {
-                account: currentAccount,
-                config: config,
-                exportedAt: new Date().toISOString()
-            };
-
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `tw-suite-${currentAccount.server}-${currentAccount.nick}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-            showAlert('Configuração exportada!', 'success');
-        }
-
-        function importConfig(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                try {
-                    const data = JSON.parse(e.target.result);
-                    currentAccount = data.account;
-                    config = data.config;
-
-                    document.getElementById('serverInput').value = currentAccount.server;
-                    document.getElementById('nickInput').value = currentAccount.nick;
-
-                    const key = `tw-suite-config:${currentAccount.server}:${currentAccount.nick}`;
-                    localStorage.setItem(key, JSON.stringify(config));
-
-                    updateEditors();
-                    updateStatus();
-                    showAlert(`Configuração importada para ${currentAccount.server} - ${currentAccount.nick}`, 'success');
-                } catch (err) {
-                    showAlert(`Erro ao importar: ${err.message}`, 'error');
-                }
-            };
-            reader.readAsText(file);
-            event.target.value = '';
-        }
-
-        function showAlert(message, type) {
-            const box = document.getElementById('alertBox');
-            box.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
-            setTimeout(() => { box.innerHTML = ''; }, 4000);
-        }
-
-        init();
-    </script>
+// ------------------------------------------------------------------
+// Início
+// ------------------------------------------------------------------
+loadLocal();
+renderAll();
+setInterval(renderRail, 60000);
+[0, 500, 1500, 4000].forEach((ms) => setTimeout(() => { if (!bridge.connected) connectBridge(); }, ms));
+})();
+</script>
 </body>
 </html>

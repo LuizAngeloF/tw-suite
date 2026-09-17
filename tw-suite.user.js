@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.0.0
+// @version      1.1.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
+// @match        file:///*dashboard.html
 // @icon         https://www.tribalwars.com.br/favicon.ico
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -223,6 +224,121 @@
   })();
 
   // ============================================================
+  // CORE: profiles — perfis por conta criados no dashboard.
+  //
+  // twsuite:profiles = { "br144:Nick": { updatedAt, modules: { <id>: { enabled, settings } } } }
+  // twsuite:accounts = { "br144:Nick": { world, player, points, villages, lastSeen, version, screen } }
+  // Ao carregar o jogo, o perfil da conta logada é gravado nas chaves que
+  // os módulos já leem (module:<id>:enabled / :settings).
+  // ============================================================
+  const profiles = (() => {
+    const SYNC_PREFIX = 'TWS1:';
+
+    function accountKeyFromGame() {
+      const gd = gameApi.getGameData();
+      if (!gd || !gd.world || !gd.player || !gd.player.name) return null;
+      return `${String(gd.world).toLowerCase()}:${gd.player.name}`;
+    }
+
+    async function getAll() {
+      return (await storage.get('profiles', {})) || {};
+    }
+
+    async function saveAll(all) {
+      await storage.set('profiles', all);
+    }
+
+    async function applyForCurrentAccount() {
+      const key = accountKeyFromGame();
+      if (!key) return { applied: false, reason: 'conta não identificada' };
+      const profile = (await getAll())[key];
+      if (!profile || !profile.modules) return { applied: false, reason: 'sem perfil', key };
+
+      const marker = `${key}@${profile.updatedAt || 0}`;
+      if ((await storage.get('profileApplied', '')) === marker) return { applied: false, reason: 'já aplicado', key };
+
+      for (const [id, mod] of Object.entries(profile.modules)) {
+        if (typeof mod.enabled === 'boolean') await storage.setModuleEnabled(id, mod.enabled);
+        const current = await storage.getModuleSettings(id, {});
+        const next = { ...current, ...(mod.settings && typeof mod.settings === 'object' ? mod.settings : {}) };
+        // Alguns módulos também checam settings.enabled além da chave :enabled.
+        if (typeof mod.enabled === 'boolean') next.enabled = mod.enabled;
+        await storage.setModuleSettings(id, next);
+      }
+      await storage.set('profileApplied', marker);
+      log.info(`Perfil do dashboard aplicado para ${key}.`);
+      return { applied: true, key };
+    }
+
+    async function reportStatus() {
+      const key = accountKeyFromGame();
+      if (!key) return;
+      const gd = gameApi.getGameData();
+      const accounts = (await storage.get('accounts', {})) || {};
+      accounts[key] = {
+        world: String(gd.world).toLowerCase(),
+        player: gd.player.name,
+        points: Number(gd.player.points) || 0,
+        villages: Number(gd.player.villages) || 0,
+        village: gd.village ? { name: gd.village.name, x: gd.village.x, y: gd.village.y } : null,
+        screen: gameApi.getCurrentScreen(),
+        lastSeen: Date.now(),
+        version: (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '?',
+      };
+      await storage.set('accounts', accounts);
+    }
+
+    async function importSyncCode(code) {
+      const raw = String(code || '').trim();
+      if (!raw.startsWith(SYNC_PREFIX)) throw new Error('Código inválido (esperado prefixo TWS1:).');
+      const json = decodeURIComponent(escape(atob(raw.slice(SYNC_PREFIX.length))));
+      const data = JSON.parse(json);
+      if (!data || typeof data.profiles !== 'object') throw new Error('Código sem perfis.');
+      const all = await getAll();
+      Object.assign(all, data.profiles);
+      await saveAll(all);
+      await storage.remove('profileApplied');
+      return Object.keys(data.profiles).length;
+    }
+
+    // Roda só na página do dashboard (file://). O dashboard e o script
+    // conversam por postMessage porque o sandbox do Tampermonkey não
+    // compartilha funções com a página de forma confiável entre navegadores.
+    function startDashboardBridge() {
+      const reply = (id, ok, payload) =>
+        window.postMessage({ twsuite: 'bridge-res', id, ok, payload }, '*');
+
+      window.addEventListener('message', async (ev) => {
+        if (ev.source !== window || !ev.data || ev.data.twsuite !== 'bridge-req') return;
+        const { id, op, payload } = ev.data;
+        try {
+          if (op === 'hello') {
+            const version = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '?';
+            reply(id, true, { version });
+          } else if (op === 'pull') {
+            reply(id, true, { profiles: await getAll(), accounts: (await storage.get('accounts', {})) || {} });
+          } else if (op === 'pushProfiles') {
+            await saveAll(payload.profiles || {});
+            reply(id, true, {});
+          } else if (op === 'forgetAccount') {
+            const accounts = (await storage.get('accounts', {})) || {};
+            delete accounts[payload.key];
+            await storage.set('accounts', accounts);
+            reply(id, true, {});
+          } else {
+            reply(id, false, { error: `op desconhecida: ${op}` });
+          }
+        } catch (e) {
+          reply(id, false, { error: String(e && e.message || e) });
+        }
+      });
+      window.postMessage({ twsuite: 'bridge-ready' }, '*');
+    }
+
+    return { accountKeyFromGame, applyForCurrentAccount, reportStatus, importSyncCode, startDashboardBridge };
+  })();
+
+  // ============================================================
   // CORE: moduleLoader — registro e execução de módulos.
   //
   // Contrato de módulo (ver README.md):
@@ -370,9 +486,22 @@
         </div>
         <div id="twsuite-diagnostics" style="margin-bottom:10px; font-size:11px; opacity:0.85; line-height:1.5;"></div>
         <div id="twsuite-module-list"></div>
+        <button id="twsuite-import-code" style="margin-top:10px; width:100%; padding:6px; cursor:pointer;">Importar código do dashboard</button>
       `;
       document.body.appendChild(el);
       el.querySelector('#twsuite-close').addEventListener('click', togglePanel);
+      el.querySelector('#twsuite-import-code').addEventListener('click', async () => {
+        const code = window.prompt('Cole o código de sincronização gerado no dashboard (começa com TWS1:)');
+        if (!code) return;
+        try {
+          const count = await profiles.importSyncCode(code);
+          const result = await profiles.applyForCurrentAccount();
+          window.alert(`${count} perfil(is) importado(s).` + (result.applied ? ' Perfil desta conta aplicado — recarregue a página.' : ''));
+          renderModuleList();
+        } catch (e) {
+          window.alert(`Falha ao importar: ${e.message}`);
+        }
+      });
       return el;
     }
 
@@ -462,58 +591,25 @@
     const { nativeMenuInjected } = ui.init();
     await storage.set('core:lastBootstrap', new Date().toISOString());
 
+    try {
+      await profiles.applyForCurrentAccount();
+      await profiles.reportStatus();
+    } catch (e) {
+      log.error('Falha ao aplicar perfil do dashboard:', e);
+    }
+
     log.info(`Carregado. Tela: ${gameApi.getCurrentScreen()}. Menu nativo injetado: ${nativeMenuInjected}. Módulos registrados: ${moduleLoader.getRegistry().length}.`);
 
     await moduleLoader.runAll();
   }
 
-  // Injetar link pro dashboard no menu nativo
-  function injectDashboardLink() {
-    const menuRow = document.getElementById('menu_row') || document.getElementById('menu_row2');
-    if (!menuRow) return;
-
-    const dashLink = document.createElement('a');
-    dashLink.href = '#';
-    dashLink.textContent = 'Dashboard TW Suite';
-    dashLink.style.cssText = `
-      padding: 0 10px;
-      color: #fff;
-      text-decoration: none;
-      cursor: pointer;
-      display: inline-block;
-      margin: 0 5px;
-    `;
-    dashLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      openDashboard();
-    });
-    menuRow.appendChild(dashLink);
-  }
-
-  function openDashboard() {
-    // Abre o dashboard em nova aba
-    window.open('about:blank', 'tw-suite-dashboard', 'width=1200,height=700');
-    const win = window.open('', 'tw-suite-dashboard');
-    if (win) {
-      const dashboardHTML = localStorage.getItem('tw-suite:dashboard-html');
-      if (dashboardHTML) {
-        win.document.write(dashboardHTML);
-        win.document.close();
-      } else {
-        win.document.write('<p>Dashboard não encontrado. Baixe o dashboard.html do repositório.</p>');
-        win.document.close();
-      }
-    }
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      bootstrap();
-      injectDashboardLink();
-    });
+  if (location.protocol === 'file:') {
+    profiles.startDashboardBridge();
+    window.TWSuite.dashboardOnly = true;
+  } else if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrap);
   } else {
     bootstrap();
-    injectDashboardLink();
   }
 })();
 

@@ -1,162 +1,34 @@
-# TW Suite Dashboard
+# TW Suite · Sala de Guerra
 
-Dashboard centralizado para controlar todos os módulos de automação do TW Suite.
+Painel para cadastrar suas contas e escolher o que cada uma automatiza. O script aplica a configuração sozinho quando você abre o jogo com a conta.
 
-## Como Usar
+## Instalação
 
-### 1. Abrir o Dashboard
+1. Atualize o **TW Suite no Tampermonkey para a v1.1.0** ou mais nova.
+2. Baixe o `dashboard.html` para o seu computador (qualquer pasta).
+3. No Chrome, abra `chrome://extensions`, clique em **Detalhes** no Tampermonkey e ative **Permitir acesso a URLs de arquivo**.
+4. Abra o `dashboard.html` no navegador. O selo no topo deve mostrar **Sincronizado**.
 
-Você tem duas opções:
+Sem o passo 3 o painel funciona, mas grava só no navegador. Nesse caso use o **código de sincronização**: gere no painel e, no jogo, abra `TW Suite → Importar código do dashboard`.
 
-**Opção A: Via Menu do Jogo**
-- Instale o script do TW Suite via Tampermonkey
-- Acesse o Tribal Wars e procure por "Dashboard TW Suite" no menu de navegação (próximo ao nome da aldeia)
-- Clique para abrir o dashboard em nova aba
+## Como funciona
 
-**Opção B: Arquivo Local**
-- Abra o arquivo `dashboard.html` diretamente no navegador
-- Use `Ctrl+O` (Windows) ou `Cmd+O` (Mac) e selecione o arquivo
+- Cada conta é identificada por **mundo + nick** (ex.: `br144` + `Agostinho`), exatamente como no jogo.
+- Ao carregar o jogo, o script lê o perfil da conta logada e liga/desliga os módulos com as configurações escolhidas.
+- O script também informa ao painel os pontos, as aldeias e o último acesso de cada conta.
+- **Nenhuma senha é pedida nem guardada.** O script roda no seu navegador, já logado. Se você colar uma lista `usuario|senha|mundo`, a senha é descartada.
 
-### 2. Selecionar Conta
+## Recursos
 
-- **Servidor**: Digite o servidor (ex: br144)
-- **Nick**: Digite seu nick no jogo
-- Clique em "Carregar Conta" pra carregar as configurações dessa conta
+| Recurso | Onde |
+|---|---|
+| Adição em massa (`nick\|mundo`, `mundo:nick` ou só `nick`) com escolha de scripts por módulo | Botão **Em massa** |
+| Perfis prontos por módulo (ex.: Farm Leve / Equilibrado / Agressivo) e ajustes finos com sliders | Cartões no dossiê da conta |
+| Modo teste por conta (os módulos só simulam) | Faixa abaixo das estatísticas |
+| Modelos reutilizáveis (3 prontos + os seus) | Painel lateral ou **Aplicar modelo** |
+| Ações em lote: clique no selo do mundo (ou Ctrl+clique) para selecionar várias contas | Barra inferior |
+| Paleta de comandos | `Ctrl + K` |
+| Busca de contas | `/` |
+| Backup e importação em `.json` (aceita também o formato do dashboard antigo) | Topo |
 
-### 3. Ativar/Desativar Módulos
-
-- Clique em qualquer módulo da lista à esquerda
-- Marque a checkbox "Módulo Habilitado" pra ativar/desativar
-- Edite as configurações em JSON
-- Clique em "Salvar" pra aplicar
-
-### 4. Multi Contas
-
-Cada conta (servidor + nick) tem suas próprias configurações salvas:
-
-- Mude o servidor/nick
-- Clique "Carregar Conta" pra ver as configurações dessa conta
-- Clique "Nova Conta" pra criar uma configuração nova
-
-### 5. Backup e Restore
-
-**Exportar** (download):
-- Clique "📥 Exportar Config"
-- Um arquivo JSON é baixado com todas as configurações
-- Salve esse arquivo em lugar seguro
-
-**Importar** (upload):
-- Clique "📤 Importar Config"
-- Selecione um arquivo JSON exportado antes
-- As configurações são carregadas
-
-## Estrutura de Configurações
-
-Cada módulo pode ter configurações diferentes:
-
-```json
-{
-  "auto-farm": {
-    "enabled": true,
-    "dryRun": false,
-    "maxDistance": 12,
-    "cooldownMinutes": 30,
-    "templates": [
-      {
-        "id": "tpl_abc123",
-        "name": "Padrão 1",
-        "units": {
-          "spear": 10,
-          "sword": 10,
-          "light": 5
-        }
-      }
-    ],
-    "activeTemplateId": "tpl_abc123"
-  },
-  "scheduler": {
-    "enabled": true
-  },
-  "notif-discord": {
-    "enabled": true,
-    "webhookUrl": "https://discord.com/api/webhooks/...",
-    "enableAttackAlert": true,
-    "enableDefenseAlert": true
-  }
-}
-```
-
-## Sincronização com Tampermonkey
-
-1. **No Dashboard**: Configure os módulos e clique "Salvar"
-2. **Clique "Exportar Config"** pra baixar um JSON com todas as suas configurações
-3. **No Jogo**: Abra o menu TW Suite e procure por um botão de importar configurações (em desenvolvimento)
-4. As configurações são armazenadas **localmente** no seu navegador via `localStorage`
-
-## Módulos Disponíveis
-
-| Módulo | Tela | Descrição |
-|--------|------|-----------|
-| Auto Farm | place | Descoberta e envio de ataques |
-| Agendador | place | Fila de ataques agendados |
-| Auto Recrutamento | train | Recruta tropas automaticamente |
-| Coleta Automática | scavenge | Coleta/desbloqueia recursos |
-| Notificações Discord | any | Alertas via Discord |
-| Balanceador | overview_villages | Distribui recursos |
-| Mega Construtor | main | Constrói automaticamente |
-| Coleta em Massa | am_farm | Coleta todos de uma vez |
-| Auto Defesa | any | Mobiliza tropas em ataque |
-
-## Multi Contas - Guia Prático
-
-**Cenário**: Você tem 3 contas (br144 Player, pt100 Guerreiro, br145 Explorador)
-
-1. Abra o Dashboard
-2. Defina: Servidor = `br144`, Nick = `Player`
-3. Configure os módulos como quiser
-4. Clique "Salvar"
-5. Clique "Exportar Config" → salve como `br144-player.json`
-6. Agora mude: Servidor = `pt100`, Nick = `Guerreiro`
-7. Configure diferente (ex: sem Discord, só farm)
-8. Clique "Salvar"
-9. Cada conta tem suas próprias configurações!
-
-**Pra trocar entre contas**:
-- Mude o servidor/nick no dashboard
-- Clique "Carregar Conta"
-- As configurações daquela conta aparecem
-
-**Pra restaurar de um backup**:
-- Mude pro servidor/nick correto
-- Clique "Importar Config"
-- Selecione o arquivo JSON baixado antes
-- Pronto!
-
-## Dica de Segurança
-
-- **Nunca** compartilhe seus arquivos JSON exportados — contêm URLs de webhooks Discord e outras configs sensíveis
-- Use senhas fortes no Tampermonkey (se usar)
-- Os dados são armazenados **apenas localmente** no seu navegador — ninguém tem acesso
-
-## Problemas Comuns
-
-**P: Dashboard não abre?**
-- Verifique se o Tampermonkey tem permissão pra acessar `about:blank`
-- Ou abra o `dashboard.html` diretamente no navegador
-
-**P: Configurações não salvam?**
-- Verifique o console (F12) pra erros de JSON
-- Confirme que está marcando "Salvar" depois de alterar
-- O navegador armazena via localStorage — dados só existem localmente
-
-**P: JSON inválido ao editar?**
-- Abra o console (F12) pra ver o erro exato
-- Use um validador JSON online pra testar
-
-## Próximas Melhorias
-
-- [ ] Upload direto de config dentro do Tampermonkey (sem download/upload manual)
-- [ ] Cloud sync (salvar configurações num servidor)
-- [ ] Interface de edição mais visual (sem JSON)
-- [ ] Histórico de alterações
-- [ ] Importar config de outras contas
+Contas novas sempre começam em **modo teste**.
