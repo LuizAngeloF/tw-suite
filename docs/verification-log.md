@@ -77,7 +77,9 @@ Pedido do usuário: em vez de escolher 1 tropa + 1 quantidade, poder montar mode
 
 `submitAttackStep1`/`submitAttackStep2`/`submitAttack` já eram genéricos o bastante (iteram `UNIT_FIELDS` e leem de um objeto) — só trocou a assinatura de `(unit, amount)` pra `(units)`, um objeto `{spear: N, sword: N, ...}`. Não precisou mexer no mecanismo de envio em si (mesmos dois POSTs, mesmo token `h`), só na camada de UI/dados acima.
 
-Não depende de seletor novo do jogo — os modelos são uma estrutura nossa (`settings.templates`), sem relação com os "Modelos de tropas" nativos do jogo (que são uma feature separada, limitada a 2 sem premium). Portanto **não há nada pra verificar ao vivo nessa mudança além do fluxo de UI em si** (criar/editar/excluir/selecionar modelo) — o envio real usa o mesmo caminho já verificado em v0.4.1.
+Não depende de seletor novo do jogo — os modelos são uma estrutura nossa (`settings.templates`), sem relação com os "Modelos de tropas" nativos do jogo (que são uma feature separada, limitada a 2 sem premium).
+
+**VERIFIED (2026-09-19)** — testado ao vivo pelo usuário: criar modelo, selecionar como ativo, enviar com múltiplas tropas de uma vez. Funcionando.
 
 ## Fases futuras (ainda não implementadas)
 
