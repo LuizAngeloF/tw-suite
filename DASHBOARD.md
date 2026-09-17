@@ -4,7 +4,7 @@ Painel para cadastrar suas contas e escolher o que cada uma automatiza. O script
 
 ## Instalação
 
-1. Atualize o **TW Suite no Tampermonkey para a v1.2.0** ou mais nova.
+1. Atualize o **TW Suite no Tampermonkey para a v1.2.1** ou mais nova.
 2. Baixe o `dashboard.html` para o seu computador (qualquer pasta).
 3. No Chrome, abra `chrome://extensions`, clique em **Detalhes** no Tampermonkey e ative **Permitir acesso a URLs de arquivo**.
 4. Abra o `dashboard.html` no navegador. O selo no topo deve mostrar **Sincronizado**.
@@ -42,6 +42,14 @@ O cartão do Auto Farm tem uma lista de modelos de tropas (nome + quantidade de 
 ## Status ao vivo
 
 Depois que o script roda pelo menos uma vez numa conta (até ~90s após abrir o jogo), o dossiê ganha um cartão **Ao vivo** com barras de recursos, tropas paradas na aldeia e um aviso quando há ataque a caminho. O dashboard busca essa informação a cada ~20s enquanto estiver aberto.
+
+## Se não sincronizar
+
+1. No jogo, abra o painel **TW Suite** (link no menu ou botão flutuante). Ele agora mostra um bloco **"Sincronização com o dashboard"** com `game_data.world`, o nick e a **chave calculada** (ex.: `br144:promiss`).
+2. No dashboard, confira se a conta está cadastrada com **exatamente** esse mesmo mundo e nick — a chave precisa bater dos dois lados.
+3. Se o dashboard mostrar **"Só neste navegador"** e não **"Sincronizado"**, o script não está sendo injetado na página do dashboard. Confira em `chrome://extensions → Tampermonkey → Detalhes → Permitir acesso a URLs de arquivo`, e recarregue o dashboard depois de ativar.
+4. Enquanto isso não funcionar, use **"Usar código de sincronização"** no dashboard — copia um código, cole em `TW Suite → Importar código do dashboard` no jogo. Funciona sempre, independente da permissão acima.
+5. Depois de importar, abra o painel **TW Suite** de novo — "Último perfil aplicado" deve mostrar ✅ com a chave da conta. Se mostrar "sem perfil salvo", ele lista as chaves que reconhece — compare com a chave calculada do passo 1.
 
 ## Limitações conhecidas
 

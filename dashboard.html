@@ -1589,10 +1589,11 @@ function asideHTML() {
     : `
       <div class="sync-hero"><span class="sync-orb">${icon('link')}</span><div><b>Só neste navegador</b><span>O script ainda não está lendo este painel</span></div></div>
       <ol class="steps">
-        <li><span>Atualize o TW Suite no Tampermonkey para a versão <code>1.1.0</code> ou mais nova.</span></li>
-        <li><span>Nos detalhes da extensão Tampermonkey, ative <code>Permitir acesso a URLs de arquivo</code>.</span></li>
-        <li><span>Recarregue esta página.</span></li>
+        <li><span>Atualize o TW Suite no Tampermonkey para a versão <code>1.2.1</code> ou mais nova.</span></li>
+        <li><span>Abra <code>chrome://extensions</code>, clique em <b>Detalhes</b> no Tampermonkey e ative <code>Permitir acesso a URLs de arquivo</code>. (Esse botão fica na página da extensão, não dentro do script.)</span></li>
+        <li><span>Recarregue esta página. O ícone do Tampermonkey deve mostrar um número — se continuar em 0, o passo anterior não pegou.</span></li>
       </ol>
+      <p class="note" style="margin:10px 0">Enquanto isso não estiver ativo, use o código abaixo pra sincronizar manualmente — funciona sempre, sem depender de permissão nenhuma.</p>
       <button class="btn btn-ghost btn-sm" data-act="sync-code" type="button" style="width:100%">${icon('key', 'sm')}Usar código de sincronização</button>`;
 
   const models = allModels().map((md) => `

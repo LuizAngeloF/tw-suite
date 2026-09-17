@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.2.0
+// @version      1.2.1
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
 // @match        file:///*dashboard.html
+// @match        file://*/dashboard.html
+// @include      file:///*dashboard.html*
 // @icon         https://www.tribalwars.com.br/favicon.ico
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -233,6 +235,7 @@
   // ============================================================
   const profiles = (() => {
     const SYNC_PREFIX = 'TWS1:';
+    let lastApplyResult = null;
 
     function accountKeyFromGame() {
       const gd = gameApi.getGameData();
@@ -250,12 +253,22 @@
 
     async function applyForCurrentAccount() {
       const key = accountKeyFromGame();
-      if (!key) return { applied: false, reason: 'conta não identificada' };
-      const profile = (await getAll())[key];
-      if (!profile || !profile.modules) return { applied: false, reason: 'sem perfil', key };
+      if (!key) {
+        lastApplyResult = { applied: false, reason: 'conta não identificada (game_data.world ou game_data.player ausente)' };
+        return lastApplyResult;
+      }
+      const all = await getAll();
+      const profile = all[key];
+      if (!profile || !profile.modules) {
+        lastApplyResult = { applied: false, reason: 'sem perfil salvo pro dashboard para esta chave', key, knownKeys: Object.keys(all) };
+        return lastApplyResult;
+      }
 
       const marker = `${key}@${profile.updatedAt || 0}`;
-      if ((await storage.get('profileApplied', '')) === marker) return { applied: false, reason: 'já aplicado', key };
+      if ((await storage.get('profileApplied', '')) === marker) {
+        lastApplyResult = { applied: false, reason: 'já aplicado (nada novo)', key };
+        return lastApplyResult;
+      }
 
       for (const [id, mod] of Object.entries(profile.modules)) {
         if (typeof mod.enabled === 'boolean') await storage.setModuleEnabled(id, mod.enabled);
@@ -267,7 +280,12 @@
       }
       await storage.set('profileApplied', marker);
       log.info(`Perfil do dashboard aplicado para ${key}.`);
-      return { applied: true, key };
+      lastApplyResult = { applied: true, key };
+      return lastApplyResult;
+    }
+
+    function getLastApplyResult() {
+      return lastApplyResult;
     }
 
     async function reportStatus() {
@@ -338,7 +356,7 @@
       window.postMessage({ twsuite: 'bridge-ready' }, '*');
     }
 
-    return { accountKeyFromGame, applyForCurrentAccount, reportStatus, importSyncCode, startDashboardBridge };
+    return { accountKeyFromGame, applyForCurrentAccount, getLastApplyResult, reportStatus, importSyncCode, startDashboardBridge };
   })();
 
   // ============================================================
@@ -541,13 +559,25 @@
       const diag = panelEl.querySelector('#twsuite-diagnostics');
       const gd = gameApi.getGameData();
       const version = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '?';
+      const key = profiles.accountKeyFromGame();
+      const last = profiles.getLastApplyResult();
       const lines = [
         `Versão: ${version}`,
         `Tela atual: ${gameApi.getCurrentScreen()}`,
         `game_data: ${gd ? 'encontrado' : 'NÃO encontrado'}`,
         `Offset de servidor: ${serverTime.offsetMs}ms`,
+        `---`,
+        `<strong>Sincronização com o dashboard</strong>`,
+        `game_data.world: <code>${gd ? esc(String(gd.world)) : '?'}</code>`,
+        `game_data.player.name: <code>${gd && gd.player ? esc(String(gd.player.name)) : '?'}</code>`,
+        `Chave calculada: <code>${key ? esc(key) : '(não identificada)'}</code>`,
+        `Último perfil aplicado: ${last ? (last.applied ? `✅ ${esc(last.key)}` : `⚠️ ${esc(last.reason)}${last.knownKeys ? ` — chaves salvas: ${last.knownKeys.length ? last.knownKeys.map(esc).join(', ') : '(nenhuma)'}` : ''}`) : 'ainda não tentado'}`,
       ];
       diag.innerHTML = lines.join('<br>');
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
     function togglePanel() {
