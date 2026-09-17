@@ -1,15 +1,19 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.3.1
+// @version      0.3.2
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
 // @icon         https://www.tribalwars.com.br/favicon.ico
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_deleteValue
+// @grant        GM_listValues
 // @grant        GM.setValue
 // @grant        GM.getValue
+// @grant        GM.deleteValue
+// @grant        GM.listValues
 // @grant        unsafeWindow
 // @run-at       document-end
 // @updateURL    https://raw.githubusercontent.com/LuizAngeloF/tw-suite/main/tw-suite.user.js
@@ -73,6 +77,17 @@
       if (typeof GM !== 'undefined' && GM.setValue) return GM.setValue(key, value);
       log.warn('Nenhuma API GM_setValue/GM.setValue disponível — verifique os @grant do script.');
     }
+    function rawDelete(key) {
+      if (typeof GM_deleteValue === 'function') return GM_deleteValue(key);
+      if (typeof GM !== 'undefined' && GM.deleteValue) return GM.deleteValue(key);
+      log.warn('Nenhuma API GM_deleteValue/GM.deleteValue disponível — verifique os @grant do script.');
+    }
+    function rawListKeys() {
+      if (typeof GM_listValues === 'function') return GM_listValues();
+      if (typeof GM !== 'undefined' && GM.listValues) return GM.listValues();
+      log.warn('Nenhuma API GM_listValues/GM.listValues disponível — verifique os @grant do script.');
+      return [];
+    }
 
     const moduleEnabledKey = (id) => `${NAMESPACE}:module:${id}:enabled`;
     const moduleSettingsKey = (id) => `${NAMESPACE}:module:${id}:settings`;
@@ -96,6 +111,16 @@
       },
       async set(key, value) {
         return rawSet(`${NAMESPACE}:${key}`, value);
+      },
+      async remove(key) {
+        return rawDelete(`${NAMESPACE}:${key}`);
+      },
+      async removeByPrefix(prefix) {
+        const fullPrefix = `${NAMESPACE}:${prefix}`;
+        const keys = await rawListKeys();
+        const matching = keys.filter((k) => k.startsWith(fullPrefix));
+        for (const k of matching) await rawDelete(k);
+        return matching.length;
       },
     };
   })();
@@ -760,6 +785,7 @@
       }
 
       let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+      const myVillage = { id: gd.village.id, x: gd.village.x, y: gd.village.y };
 
       let panel = document.getElementById(PANEL_ID);
       if (!panel) panel = buildPanel();
@@ -784,88 +810,119 @@
         log.info('Configurações do Auto Farm atualizadas:', settings);
       });
 
+      const resetBtn = document.createElement('button');
+      resetBtn.textContent = 'Restaurar alvos';
+      resetBtn.style.fontSize = '11px';
+      resetBtn.style.marginBottom = '6px';
+      resetBtn.title = 'Limpa o cooldown desta aldeia — alvos já tentados voltam a aparecer';
+      resetBtn.addEventListener('click', async () => {
+        const removed = await storage.removeByPrefix(`auto-farm:lastSent:${myVillage.id}:`);
+        log.info(`${removed} alvo(s) restaurado(s).`);
+        await refreshList();
+      });
+      panel.appendChild(resetBtn);
+
       const listEl = document.createElement('div');
-      listEl.textContent = 'Buscando aldeias bárbaras próximas...';
       panel.appendChild(listEl);
 
-      const myVillage = { id: gd.village.id, x: gd.village.x, y: gd.village.y };
-      const targets = await findTargets(ctx, myVillage, settings);
+      async function refreshList() {
+        listEl.innerHTML = 'Buscando aldeias bárbaras próximas...';
+        const targets = await findTargets(ctx, myVillage, settings);
 
-      listEl.innerHTML = '';
-      if (targets.length === 0) {
-        listEl.textContent = 'Nenhum alvo bárbaro disponível no alcance / fora do cooldown.';
-        return;
-      }
+        listEl.innerHTML = '';
+        if (targets.length === 0) {
+          listEl.textContent = 'Nenhum alvo bárbaro disponível no alcance / fora do cooldown.';
+          return;
+        }
 
-      for (const target of targets) {
-        const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.justifyContent = 'space-between';
-        row.style.alignItems = 'center';
-        row.style.margin = '3px 0';
+        for (const target of targets) {
+          const row = document.createElement('div');
+          row.style.display = 'flex';
+          row.style.justifyContent = 'space-between';
+          row.style.alignItems = 'center';
+          row.style.margin = '3px 0';
 
-        const label = document.createElement('span');
-        label.textContent = `${target.x}|${target.y} (${target.distance.toFixed(1)})`;
-        row.appendChild(label);
+          const label = document.createElement('span');
+          label.textContent = `${target.x}|${target.y} (${target.distance.toFixed(1)})`;
+          row.appendChild(label);
 
-        const btn = document.createElement('button');
-        btn.textContent = settings.dryRun ? 'Simular' : 'Enviar';
-        btn.style.fontSize = '11px';
-        btn.addEventListener('click', async () => {
-          const unitInput = document.querySelector('#unit_input_' + settings.unit);
-          const available = unitInput ? Number(unitInput.dataset.allCount || 0) : 0;
-          const amount = Math.min(settings.amount, available);
-
-          if (settings.dryRun) {
-            if (available <= 0) {
-              log.info(`(modo teste) enviaria ${settings.amount} "${settings.unit}" para ${target.x}|${target.y} — mas você tem 0 disponíveis agora, um envio real seria bloqueado.`);
-            } else {
-              log.info(`(modo teste) enviaria ${amount} "${settings.unit}" para ${target.x}|${target.y}${amount < settings.amount ? ` (só ${available} disponíveis)` : ''}`);
-            }
-            return;
-          }
-
-          if (available <= 0) {
-            log.warn(`Sem "${settings.unit}" disponível nesta aldeia (0 unidades) — não enviado.`);
-            return;
-          }
-          if (amount < settings.amount) {
-            log.warn(`Só ${available} "${settings.unit}" disponíveis — enviando ${amount} em vez de ${settings.amount}.`);
-          }
-
-          btn.disabled = true;
-          btn.textContent = 'Aguardando alvo...';
-          const result = await fillAndSubmitAttack(settings.unit, amount, target.x, target.y);
-          if (!result.ok) {
-            btn.disabled = false;
-            btn.textContent = settings.dryRun ? 'Simular' : 'Enviar';
-            log.error('Falha ao preencher/enviar:', result.reason);
-            return;
-          }
-          await ctx.storage.set(cooldownKey(myVillage.id, target.id), Date.now());
-          log.info(`Alvo confirmado, aguardando tela de "Enviar ataque"...`);
-
-          const confirmBtn = await waitForConfirmButton();
-          btn.disabled = false;
+          const btn = document.createElement('button');
           btn.textContent = settings.dryRun ? 'Simular' : 'Enviar';
+          btn.style.fontSize = '11px';
+          btn.addEventListener('click', async () => {
+            const unitInput = document.querySelector('#unit_input_' + settings.unit);
+            const available = unitInput ? Number(unitInput.dataset.allCount || 0) : 0;
+            const amount = Math.min(settings.amount, available);
 
-          if (!confirmBtn) {
-            log.warn('A tela de confirmação não apareceu a tempo — confira manualmente se o ataque ficou pendente.');
-            return;
-          }
-          if (settings.autoConfirm) {
+            if (settings.dryRun) {
+              if (available <= 0) {
+                log.info(`(modo teste) enviaria ${settings.amount} "${settings.unit}" para ${target.x}|${target.y} — mas você tem 0 disponíveis agora, um envio real seria bloqueado.`);
+              } else {
+                log.info(`(modo teste) enviaria ${amount} "${settings.unit}" para ${target.x}|${target.y}${amount < settings.amount ? ` (só ${available} disponíveis)` : ''}`);
+              }
+              return;
+            }
+
+            if (available <= 0) {
+              log.warn(`Sem "${settings.unit}" disponível nesta aldeia (0 unidades) — não enviado.`);
+              return;
+            }
+            if (amount < settings.amount) {
+              log.warn(`Só ${available} "${settings.unit}" disponíveis — enviando ${amount} em vez de ${settings.amount}.`);
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Aguardando alvo...';
+            const result = await fillAndSubmitAttack(settings.unit, amount, target.x, target.y);
+            if (!result.ok) {
+              btn.disabled = false;
+              btn.textContent = 'Enviar';
+              log.error('Falha ao preencher/enviar:', result.reason);
+              return;
+            }
+            log.info('Alvo confirmado, aguardando tela de "Enviar ataque"...');
+
+            const confirmBtn = await waitForConfirmButton();
+            btn.disabled = false;
+            btn.textContent = 'Enviar';
+
+            if (!confirmBtn) {
+              log.warn('A tela de confirmação não apareceu a tempo — confira manualmente se o ataque ficou pendente. Esse alvo continua na lista (nada foi marcado como enviado).');
+              return;
+            }
+
+            if (!settings.autoConfirm) {
+              log.info('Na tela de confirmação — confirme manualmente. Esse alvo continua na lista até você clicar "Restaurar alvos" (nada foi gravado como enviado ainda).');
+              return;
+            }
+
             // Reconsulta na hora do clique — o nó pego pela espera pode
             // ter sido substituído por um novo (SPA re-renderizando).
             const clickTarget = document.querySelector('#troop_confirm_submit') || confirmBtn;
             log.info(`Auto-confirmar: clicando em "Enviar ataque" -> ${target.x}|${target.y}.`);
             clickTarget.click();
-          } else {
-            log.info('Na tela de confirmação — confirme manualmente (auto-confirmar está desligado).');
-          }
-        });
-        row.appendChild(btn);
-        listEl.appendChild(row);
+
+            // Diagnóstico: se o botão ainda estiver lá e visível depois
+            // do clique, o clique provavelmente não teve efeito (alguns
+            // jogos rejeitam cliques sintéticos na ação final, como
+            // proteção anti-bot) — melhor avisar do que assumir sucesso.
+            await new Promise((r) => setTimeout(r, 800));
+            const stillThere = document.querySelector('#troop_confirm_submit');
+            if (stillThere && isVisible(stillThere)) {
+              log.warn('O botão "Enviar ataque" ainda está na tela depois do clique — o auto-confirmar provavelmente NÃO funcionou (o jogo pode estar bloqueando cliques automáticos nessa etapa). Confirme manualmente. Alvo continua na lista.');
+              return;
+            }
+
+            log.info(`Enviado (auto-confirmado): ${amount} "${settings.unit}" -> ${target.x}|${target.y}.`);
+            await ctx.storage.set(cooldownKey(myVillage.id, target.id), Date.now());
+            row.remove();
+          });
+          row.appendChild(btn);
+          listEl.appendChild(row);
+        }
       }
+
+      await refreshList();
     },
   });
 })();
