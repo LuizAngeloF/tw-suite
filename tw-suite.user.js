@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.3.0
+// @version      0.3.1
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -610,16 +610,22 @@
     return { ok: true };
   }
 
+  function isVisible(el) {
+    return !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  }
+
   // A tela de confirmação também aparece via transição client-side (sem
   // recarregar a página), então o botão não existe ainda no instante em
   // que clicamos "Ataque" — precisa esperar aparecer, do mesmo jeito que
-  // esperamos o alvo ser resolvido.
+  // esperamos o alvo ser resolvido. Exige visível (não só presente no
+  // DOM) porque a página pode manter um nó oculto/gabarito antes da
+  // troca de conteúdo terminar de verdade.
   function waitForElement(selector, timeoutMs = 5000, intervalMs = 150) {
     return new Promise((resolve) => {
       const start = Date.now();
       const tick = () => {
         const el = document.querySelector(selector);
-        if (el) {
+        if (el && isVisible(el)) {
           resolve(el);
           return;
         }
@@ -634,16 +640,16 @@
   }
 
   // #troop_confirm_submit confirmado ao vivo em 2026-09-19 (botão
-  // "Enviar ataque"). Fallbacks abaixo continuam UNVERIFIED, só como
-  // rede de segurança caso o jogo mude o id.
-  const CONFIRM_BUTTON_SELECTORS = ['#troop_confirm_submit', '.troop_confirm_go', 'input[type=submit][value*="Enviar" i]'];
-
-  async function waitForConfirmButton(timeoutMs = 5000) {
-    for (const sel of CONFIRM_BUTTON_SELECTORS) {
-      const btn = document.querySelector(sel);
-      if (btn) return btn;
-    }
-    return waitForElement(CONFIRM_BUTTON_SELECTORS[0], timeoutMs);
+  // "Enviar ataque").
+  async function waitForConfirmButton(timeoutMs = 6000) {
+    const found = await waitForElement('#troop_confirm_submit', timeoutMs);
+    if (!found) return null;
+    // Pequena espera de estabilização + reconsulta: se a página tiver
+    // re-renderizado o formulário logo depois de aparecer visível, o nó
+    // que pegamos pode já estar "morto" (desligado do form ao vivo).
+    await new Promise((r) => setTimeout(r, 350));
+    const fresh = document.querySelector('#troop_confirm_submit');
+    return fresh && isVisible(fresh) ? fresh : found;
   }
 
   function buildPanel() {
@@ -848,8 +854,11 @@
             return;
           }
           if (settings.autoConfirm) {
+            // Reconsulta na hora do clique — o nó pego pela espera pode
+            // ter sido substituído por um novo (SPA re-renderizando).
+            const clickTarget = document.querySelector('#troop_confirm_submit') || confirmBtn;
             log.info(`Auto-confirmar: clicando em "Enviar ataque" -> ${target.x}|${target.y}.`);
-            confirmBtn.click();
+            clickTarget.click();
           } else {
             log.info('Na tela de confirmação — confirme manualmente (auto-confirmar está desligado).');
           }
