@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.4.0
+// @version      1.5.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -388,6 +388,16 @@
             const accounts = (await storage.get('accounts', {})) || {};
             delete accounts[payload.key];
             await storage.set('accounts', accounts);
+            reply(id, true, {});
+          } else if (op === 'resetAutoFarmTargets') {
+            // Não dá pra chamar o módulo diretamente daqui — essa página
+            // (dashboard) roda sua PRÓPRIA instância do script, separada
+            // da aba do jogo. Em vez disso, grava um pedido (por conta)
+            // que a aba do jogo confere no próprio ciclo de atualização
+            // (a cada ~8s) e executa sozinha, na aldeia certa.
+            const requests = (await storage.get('autoFarmResetRequests', {})) || {};
+            requests[payload.accountKey] = Date.now();
+            await storage.set('autoFarmResetRequests', requests);
             reply(id, true, {});
           } else {
             reply(id, false, { error: `op desconhecida: ${op}` });
@@ -876,7 +886,7 @@
 
   // Etapa 1 (try=confirm). units: { spear: 10 | 'all' }. Retorna o formulário
   // de confirmação e a duração, sem enviar nada ainda.
-  async function prepareCommand({ villageId: vid, units, x, y, type = 'attack', capToAvailable = true }) {
+  async function prepareCommand({ villageId: vid, units, x, y, type = 'attack', capToAvailable = true, catapultTarget = null }) {
     const doc = await getPlaceDoc(vid);
     const input = doc.querySelector('#inputx');
     const form = input && (input.form || input.closest('form'));
@@ -911,10 +921,17 @@
     const durEl = cdoc.querySelector('.relative_time[data-duration]') || cdoc.querySelector('[data-duration]');
     const durationMs = durEl ? Number(durEl.getAttribute('data-duration')) * 1000 : null;
 
-    return { ok: true, vid, x, y, type, units: finalUnits, confirmForm, durationMs };
+    return { ok: true, vid, x, y, type, units: finalUnits, confirmForm, durationMs, catapultTarget };
   }
 
   // Etapa 2 (action=command) — token h = game_data.csrf (VERIFIED).
+  // catapultTarget: UNVERIFIED — em ataques com catapulta o jogo mostra um
+  // seletor de "alvo do cerco" na tela de confirmação; supomos que o campo
+  // se chama `catapult_target` com valores como `wall`/`headquarter`/etc,
+  // convenção comum em scripts da comunidade, mas nunca confirmada ao vivo
+  // contra este mundo. Se o campo não existir na tela real, o jogo
+  // provavelmente ignora o valor extra e ataca normalmente (sem mirar a
+  // muralha) em vez de dar erro — degradação seguro, não perigosa.
   async function confirmCommand(prep) {
     const o2 = { cb: 'troop_confirm_submit', building: 'main', x: prep.x, y: prep.y, source_village: prep.vid, village: prep.vid, h: csrf() };
     if (prep.type === 'support') {
@@ -924,6 +941,7 @@
       o2.attack = 'true';
       o2.submit_confirm = 'Enviar ataque';
     }
+    if (prep.catapultTarget) o2.catapult_target = prep.catapultTarget;
     for (const u of UNITS) o2[u] = prep.units[u] || 0;
     const startedAt = TW.serverTime.now();
     const r2 = await postForm(`/game.php?village=${prep.vid}&screen=place&action=command`, formParams(prep.confirmForm, o2));
@@ -942,20 +960,25 @@
   }
 
   // Comandos próprios que ainda podem ser cancelados (links action=cancel).
-  // UNVERIFIED: formato exato da tabela; busca só pelo padrão do link.
+  // UNVERIFIED: formato exato da tabela; busca só pelo padrão do link e
+  // extrai o texto da linha inteira como rótulo (não sabemos os nomes
+  // exatos das colunas, então não tentamos separar alvo/hora com certeza).
   function cancelLinks(doc) {
     const seen = new Map();
     for (const a of doc.querySelectorAll('a[href*="action=cancel"]')) {
       const href = a.getAttribute('href') || '';
       const m = href.match(/[?&]id=(\d+)/);
-      if (m && !seen.has(m[1])) seen.set(m[1], href);
+      if (!m || seen.has(m[1])) continue;
+      const row = a.closest('tr');
+      const text = row ? row.textContent.replace(/\s+/g, ' ').trim() : '';
+      seen.set(m[1], { id: m[1], href, label: text.slice(0, 90) });
     }
     return seen;
   }
 
   async function listCancelableCommands(vid) {
     const { doc } = await getPage(`/game.php?village=${vid}&screen=place`);
-    return cancelLinks(doc);
+    return [...cancelLinks(doc).values()];
   }
 
   async function cancelCommand(vid, id, href) {
@@ -964,6 +987,29 @@
     const res = await getPage(url.pathname + url.search);
     const err = errorFromHtml(res.text);
     return err ? { ok: false, reason: err } : { ok: true };
+  }
+
+  // ---------- mercado premium (recursos <-> pontos premium) ----------
+  // UNVERIFIED: baseado em stefan2200/TWB (GPL-3, só consultado como
+  // referência de endpoints) — dois ajaxaction em sequência, o primeiro
+  // devolve um rate_hash que precisa voltar no segundo. "buy_<recurso>"
+  // é suposição simétrica a "sell_<recurso>" (só o sell foi referenciado
+  // de verdade); pode não existir — nesse caso o exchange_begin deve
+  // simplesmente falhar com erro, não fazer nada indevido.
+  async function premiumExchange(vid, kind, resource, amount) {
+    const field = `${kind === 'buy' ? 'buy' : 'sell'}_${resource}`;
+    const r1 = await ajax('market', 'exchange_begin', { [field]: amount }, {}, vid);
+    if (!r1.ok) return r1;
+    const rateHash = r1.response && r1.response[0] && r1.response[0].rate_hash;
+    if (!rateHash) return { ok: false, reason: 'rate_hash não encontrado na resposta do jogo' };
+    return ajax('market', 'exchange_confirm', { [field]: amount, rate_hash: rateHash, mb: '1' }, {}, vid);
+  }
+
+  async function premiumExchangeRates(vid) {
+    const { text } = await getPage(`/game.php?village=${vid}&screen=market&mode=exchange`);
+    const m = text.match(/PremiumExchange\.receiveData\((.+?)\);/s) || text.match(/PremiumExchange\.data\s*=\s*(\{.+?\});/s);
+    if (!m) return null;
+    try { return JSON.parse(m[1]); } catch { return null; }
   }
 
   // ---------- mercado: envio de recursos entre aldeias ----------
@@ -1309,7 +1355,7 @@
     sleep, jitter, gd, csrf, villageId, dist, num, parseHtml, gameDataFromHtml, formParams,
     getPage, postForm, ajax, errorFromHtml, guard, pageHasBotCheck, flagBotCheck, botState,
     prepareCommand, confirmCommand, sendCommand, availableUnits, listCancelableCommands, cancelLinks, cancelCommand,
-    sendResources, getVillageIndex, myVillages, parseGameTime, formatServerTime, serverWallOffsetMs, worldConfig,
+    sendResources, premiumExchange, premiumExchangeRates, getVillageIndex, myVillages, parseGameTime, formatServerTime, serverWallOffsetMs, worldConfig,
     notify, acquireLock, loop, h, card, parseUnitList, getIncomingAttacks, troopsHome, buildLiveSnapshot,
   };
 })();
@@ -1720,14 +1766,26 @@
         renderPaceSettings(paceHost, settings, persist);
       }
 
+      async function resetTargets() {
+        // Antes só mandava a confirmação pro console (log.info) — parecia
+        // não fazer nada porque a única resposta ficava escondida no
+        // DevTools. Agora mostra o resultado (ou o erro) na própria tela.
+        statusBox.textContent = 'Restaurando alvos...';
+        try {
+          const removed = await storage.removeByPrefix(`auto-farm:lastSent:${myVillage.id}:`);
+          log.info(`${removed} alvo(s) restaurado(s).`);
+          statusBox.textContent = `${removed} alvo(s) restaurado(s).`;
+          await refreshTargetsPreview();
+        } catch (e) {
+          log.error('Falha ao restaurar alvos:', e);
+          statusBox.textContent = `Falha ao restaurar alvos: ${(e && e.message) || e}`;
+        }
+      }
+
       const resetBtn = S.h('button', {
         text: 'Restaurar alvos', style: { fontSize: '11px', marginBottom: '6px', width: '100%' },
         title: 'Limpa o cooldown desta aldeia — alvos já tentados voltam a aparecer',
-        onclick: async () => {
-          const removed = await storage.removeByPrefix(`auto-farm:lastSent:${myVillage.id}:`);
-          log.info(`${removed} alvo(s) restaurado(s).`);
-          refreshTargetsPreview();
-        },
+        onclick: resetTargets,
       });
 
       async function refreshTargetsPreview() {
@@ -1812,10 +1870,24 @@
       // Live-refresh: se o dashboard mudar configurações desta conta
       // enquanto a página está aberta, reaplica o perfil e atualiza a
       // UI (o loop acima já relê settings a cada ciclo — isso é só
-      // pra UI/preview não ficarem visualmente desatualizados).
+      // pra UI/preview não ficarem visualmente desatualizados). Também
+      // confere se o botão "Restaurar alvos" do dashboard pediu reset
+      // (não dá pra chamar o módulo direto do dashboard — ele roda numa
+      // aba separada — então o pedido fica num sinalizador em storage.get
+      // and a aba do jogo confere aqui, a cada ciclo).
       setInterval(async () => {
         if (typeof window.TWSuite.applyProfileNow === 'function') {
           await window.TWSuite.applyProfileNow();
+        }
+        const key = window.TWSuite.accountKeyFromGame && window.TWSuite.accountKeyFromGame();
+        if (key) {
+          const requests = (await storage.get('autoFarmResetRequests', {})) || {};
+          const requestedAt = requests[key] || 0;
+          const handledAt = await storage.get(`auto-farm:resetHandledAt:${myVillage.id}`, 0);
+          if (requestedAt > handledAt) {
+            await storage.set(`auto-farm:resetHandledAt:${myVillage.id}`, requestedAt);
+            await resetTargets();
+          }
         }
         const fresh = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
         if (JSON.stringify(fresh) !== JSON.stringify(settings)) {
@@ -2826,6 +2898,414 @@
       }, 2000);
 
       log.info('Auto Defesa carregada.');
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: coin-mint — Cunhar Moedas & Puxar Recursos
+//
+// screen=snob, action=coin (coin_mint_count) ou action=reserve
+// (mundos com sistema de pacotes) — POST de formulário real, mesmo
+// padrão do TWB (GPL-3, só referência de endpoint). Puxar recursos
+// reusa S.sendResources (mercado), já usado pelo Balanceador.
+// UNVERIFIED — nunca testado ao vivo.
+// ============================================================
+(function registerCoinMint() {
+  'use strict';
+  const TW = window.TWSuite;
+  const S = TW.shared;
+  const MODULE_ID = 'coin-mint';
+  const DEFAULTS = {
+    cycleMinutes: 20, coinWood: 28000, coinStone: 30000, coinIron: 25000, maxPerCycle: 10,
+    pullResources: false, pullKeepPercent: 30, pullMaxVillages: 15, dryRun: true,
+  };
+
+  async function mint(vid, vname, s, log) {
+    const page = await S.getPage(`/game.php?village=${vid}&screen=snob`);
+    const g = S.gameDataFromHtml(page.text) || S.gd();
+    const coinInput = page.doc.querySelector('[name="coin_mint_count"]');
+    const reserveForm = page.doc.querySelector('form[action*="action=reserve"]');
+    if (!coinInput && !reserveForm) return { minted: 0, reason: 'sem opção de cunhar nesta aldeia' };
+
+    const v = g.village;
+    const byRes = Math.min(Math.floor(v.wood / s.coinWood), Math.floor(v.stone / s.coinStone), Math.floor(v.iron / s.coinIron));
+    const maxAttr = coinInput && Number(coinInput.getAttribute('max'));
+    let count = Math.min(byRes, Number(s.maxPerCycle) || 1);
+    if (maxAttr) count = Math.min(count, maxAttr);
+    if (count <= 0) return { minted: 0, reason: 'recursos insuficientes' };
+
+    if (s.dryRun) {
+      log.info(`(teste) cunharia ${count} moeda(s) em ${vname}`);
+      return { minted: count, dry: true };
+    }
+    const action = coinInput ? 'coin' : 'reserve';
+    const body = coinInput ? { coin_mint_count: count, count, h: S.csrf() } : { factor: count, h: S.csrf() };
+    const res = await S.postForm(`/game.php?village=${vid}&screen=snob&action=${action}&h=${S.csrf()}`, new URLSearchParams(body));
+    const err = S.errorFromHtml(res.text);
+    if (err) return { minted: 0, reason: err };
+    log.info(`Cunhado: ${count} moeda(s) em ${vname}`);
+    return { minted: count };
+  }
+
+  async function pull(target, s, log) {
+    const villages = (await S.myVillages()).filter((v) => String(v.id) !== String(target.id)).slice(0, s.pullMaxVillages);
+    let sent = 0;
+    for (const v of villages) {
+      if (S.botState.active) return sent;
+      const page = await S.getPage(`/game.php?village=${v.id}&screen=market&mode=send`);
+      const g = S.gameDataFromHtml(page.text);
+      const merchantsEl = page.doc.querySelector('#market_merchant_available_count');
+      if (!g || !merchantsEl || !page.doc.querySelector('input[name="wood"]')) continue;
+      let capacity = S.num(merchantsEl.textContent) * 1000;
+      const keep = (Number(g.village.storage_max) || 0) * (s.pullKeepPercent / 100);
+      const amounts = {};
+      for (const r of S.RESOURCES) {
+        const spare = Math.floor((g.village[r] - keep) / 1000) * 1000;
+        const take = Math.max(0, Math.min(spare, Math.floor(capacity / 1000) * 1000));
+        if (take >= 1000) { amounts[r] = take; capacity -= take; }
+      }
+      if (!Object.keys(amounts).length) continue;
+      if (s.dryRun) { log.info(`(teste) puxaria de ${v.name}:`, amounts); sent++; }
+      else {
+        const res = await S.sendResources(v.id, amounts, target.x, target.y);
+        if (res.ok) sent++; else log.warn(`Puxar de ${v.name} falhou:`, res.reason);
+      }
+      await S.sleep(S.jitter(1500, 3000));
+    }
+    return sent;
+  }
+
+  TW.registerModule({
+    id: MODULE_ID,
+    name: 'Cunhar Moedas & Puxar Recursos',
+    screens: ['any'],
+    defaultEnabled: false,
+    async run(ctx) {
+      const g = S.gd();
+      const target = { id: g.village.id, x: g.village.x, y: g.village.y, name: g.village.name };
+      const ui = S.card(MODULE_ID, 'Cunhar Moedas');
+      S.loop(`${MODULE_ID}:${target.id}`, async () => {
+        const s = { ...DEFAULTS, ...(await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS)) };
+        const r = await mint(target.id, target.name, s, ctx.log);
+        let msg = r.minted ? `${r.dry ? 'teste: ' : ''}${r.minted} moeda(s)` : r.reason;
+        if (s.pullResources && !S.botState.active) {
+          const pulled = await pull(target, s, ctx.log);
+          msg += ` · ${pulled} envio(s) puxados`;
+        }
+        ui.setStatus(msg);
+      }, Math.max(5, DEFAULTS.cycleMinutes) * 60000, Math.max(5, DEFAULTS.cycleMinutes) * 60000 * 1.2);
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: command-labeler — Etiquetador de Comandos
+//
+// Roda só na tela "Visão geral de comandos" (screen=info_command) —
+// não dá pra ativar de outra tela porque é um recurso nativo do
+// jogo (marcar todas as caixinhas + clicar em "Etiqueta"), não uma
+// requisição própria. Técnica adaptada de vercorgare/tribalwars,
+// MIT — clique DOM simples, sem token nenhum envolvido, risco baixo.
+// UNVERIFIED: nunca confirmado se o botão realmente se chama
+// "Etiqueta" neste mundo/idioma.
+// ============================================================
+(function registerCommandLabeler() {
+  'use strict';
+  const TW = window.TWSuite;
+  const S = TW.shared;
+  const MODULE_ID = 'command-labeler';
+  const DEFAULTS = { dryRun: true };
+
+  function findLabelButton() {
+    const candidates = [...document.querySelectorAll('input[type="submit"], button')];
+    return candidates.find((el) => /etiqueta/i.test(el.value || el.textContent || ''));
+  }
+
+  TW.registerModule({
+    id: MODULE_ID,
+    name: 'Etiquetador de Comandos',
+    screens: ['info_command'],
+    defaultEnabled: false,
+    async run(ctx) {
+      const s = await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS);
+      const ui = S.card(MODULE_ID, 'Etiquetador');
+      ui.body.appendChild(S.h('div', { class: 'tws-muted', text: 'Só age quando você está nesta tela (Comandos).' }));
+
+      const boxes = [...document.querySelectorAll('input[type="checkbox"]')];
+      const btn = findLabelButton();
+      if (!boxes.length || !btn) {
+        ui.setStatus('elementos não encontrados nesta tela');
+        return;
+      }
+      boxes.forEach((cb) => { cb.checked = true; });
+      if (s.dryRun) {
+        ctx.log.info(`(teste) etiquetaria ${boxes.length} comando(s)`);
+        ui.setStatus(`teste: etiquetaria ${boxes.length}`);
+        return;
+      }
+      btn.click();
+      ctx.log.info(`Etiquetou ${boxes.length} comando(s).`);
+      ui.setStatus(`${boxes.length} comando(s) etiquetado(s)`);
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: wall-breaker — Derrubar Muralha
+//
+// Envia catapultas mirando a muralha (campo `catapult_target`,
+// UNVERIFIED — ver nota em shared.confirmCommand) antes de uma
+// aldeia entrar na rotação de farm pesado. Lista de alvos é manual
+// (não faz sentido descobrir via village.txt: bárbaras raramente
+// têm muralha relevante — isso é pra aldeias de jogador específicas).
+// ============================================================
+(function registerWallBreaker() {
+  'use strict';
+  const TW = window.TWSuite;
+  const S = TW.shared;
+  const MODULE_ID = 'wall-breaker';
+  const DEFAULTS = { targets: '', catapultCount: 4, escortUnit: 'none', escortAmount: 0, cooldownHours: 12, dryRun: true };
+
+  function parseTargets(text) {
+    return String(text || '').split(/[\n;]+/).map((s) => s.trim()).filter(Boolean).map((s) => {
+      const m = s.match(/(\d+)\s*\|\s*(\d+)/);
+      return m ? { x: Number(m[1]), y: Number(m[2]), label: s } : null;
+    }).filter(Boolean);
+  }
+
+  TW.registerModule({
+    id: MODULE_ID,
+    name: 'Derrubar Muralha',
+    screens: ['place'],
+    defaultEnabled: false,
+    async run(ctx) {
+      const gd = ctx.gameApi.getGameData();
+      if (!gd || !gd.village) return;
+      const vid = gd.village.id;
+      const ui = S.card(MODULE_ID, 'Derrubar Muralha');
+      const listHost = S.h('div', { class: 'tws-list' });
+      ui.body.append(
+        S.h('div', { class: 'tws-muted', text: 'Alvos configurados no dashboard (um "X|Y" por linha).' }),
+        listHost,
+      );
+
+      S.loop(`${MODULE_ID}:${vid}`, async () => {
+        const s = { ...DEFAULTS, ...(await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS)) };
+        const targets = parseTargets(s.targets);
+        listHost.innerHTML = '';
+        if (!targets.length) { ui.setStatus('sem alvos configurados'); return; }
+
+        const now = Date.now();
+        let picked = null;
+        for (const t of targets) {
+          const key = `wall-breaker:lastSent:${vid}:${t.x}_${t.y}`;
+          const last = await ctx.storage.get(key, 0);
+          listHost.appendChild(S.h('div', { class: 'tws-row', text: `${t.x}|${t.y} · ${last ? `há ${Math.round((now - last) / 60000)}min` : 'nunca'}` }));
+          if (!picked && now - last >= s.cooldownHours * 3600000) picked = t;
+        }
+        if (!picked) { ui.setStatus(`${targets.length} alvo(s), todos em cooldown`); return; }
+
+        const units = { catapult: Number(s.catapultCount) || 1 };
+        if (s.escortUnit !== 'none' && s.escortAmount > 0) units[s.escortUnit] = Number(s.escortAmount);
+
+        if (s.dryRun) {
+          ctx.log.info(`(teste) derrubaria muralha de ${picked.x}|${picked.y} com ${units.catapult} catapulta(s)`);
+          ui.setStatus(`teste: miraria ${picked.x}|${picked.y}`);
+          return;
+        }
+
+        const res = await S.sendCommand({ villageId: vid, units, x: picked.x, y: picked.y, type: 'attack', catapultTarget: 'wall', capToAvailable: true });
+        if (!res.ok) { ctx.log.warn(`Falha ao mirar muralha de ${picked.x}|${picked.y}:`, res.reason); ui.setStatus(`falhou: ${res.reason}`); return; }
+        await ctx.storage.set(`wall-breaker:lastSent:${vid}:${picked.x}_${picked.y}`, Date.now());
+        ctx.log.info(`Catapultas enviadas contra a muralha de ${picked.x}|${picked.y}.`);
+        ui.setStatus(`enviado a ${picked.x}|${picked.y}`);
+      }, 60000, 100000);
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: snip-cancel — Cancelamento agendado
+//
+// Não tentamos automatizar a decisão de "qual comando enviar pra
+// criar o efeito de snipe" — isso depende de ler a tela do
+// adversário (Etiquetador) e calcular janelas que nunca confirmamos.
+// O que este módulo garante, com confiança: você escolhe QUALQUER
+// comando seu que ainda pode ser cancelado, escolhe a hora, e o
+// cancelamento dispara no segundo certo (via serverTime.scheduleAt),
+// mesmo se você não estiver olhando a tela.
+// ============================================================
+(function registerSnipCancel() {
+  'use strict';
+  const TW = window.TWSuite;
+  const S = TW.shared;
+  const MODULE_ID = 'snip-cancel';
+  const QUEUE_KEY = 'snip-cancel:queue';
+
+  const queueLoad = () => TW.storage.get(QUEUE_KEY, []);
+  const queueSave = (q) => TW.storage.set(QUEUE_KEY, q);
+
+  TW.registerModule({
+    id: MODULE_ID,
+    name: 'Snip por Cancelamento',
+    screens: ['any'],
+    defaultEnabled: false,
+    async run(ctx) {
+      const vid = S.villageId();
+      if (!vid) return;
+      const ui = S.card(MODULE_ID, 'Snip/Cancelamento');
+      const state = { queue: await queueLoad(), armed: new Set() };
+
+      const cmdHost = S.h('div', { class: 'tws-list' });
+      const queueHost = S.h('div', { class: 'tws-list' });
+      const timeInput = S.h('input', { type: 'text', placeholder: 'HH:MM:SS para cancelar', style: { width: '100%' } });
+      let selectedId = null;
+
+      async function refreshCommands() {
+        cmdHost.innerHTML = '';
+        const cmds = await S.listCancelableCommands(vid).catch(() => []);
+        if (!cmds.length) { cmdHost.appendChild(S.h('div', { class: 'tws-muted', text: 'Nenhum comando cancelável agora.' })); return; }
+        for (const c of cmds) {
+          const row = S.h('button', {
+            class: 'tws-row', style: { width: '100%', textAlign: 'left', border: c.id === selectedId ? '1px solid #7a5230' : 'none' },
+            text: c.label || `#${c.id}`,
+            onclick: () => { selectedId = c.id; refreshCommands(); },
+          });
+          cmdHost.appendChild(row);
+        }
+      }
+
+      function refreshQueue() {
+        queueHost.innerHTML = '';
+        if (!state.queue.length) { queueHost.appendChild(S.h('div', { class: 'tws-muted', text: 'Nada agendado.' })); return; }
+        for (const item of state.queue) {
+          const eta = item.cancelAtMs - S.serverTime.now();
+          queueHost.appendChild(S.h('div', { class: 'tws-row' }, [
+            `#${item.commandId} em ${Math.max(0, Math.round(eta / 1000))}s`,
+            S.h('button', { text: '✕', onclick: async () => { state.queue = state.queue.filter((i) => i.id !== item.id); await queueSave(state.queue); refreshQueue(); } }),
+          ]));
+        }
+      }
+
+      const addBtn = S.h('button', {
+        text: '+ Agendar cancelamento', style: { width: '100%' },
+        onclick: async () => {
+          if (!selectedId) return ctx.log.warn('Selecione um comando na lista acima primeiro.');
+          const cancelAtMs = S.parseGameTime(timeInput.value);
+          if (!cancelAtMs) return ctx.log.warn('Horário inválido — use HH:MM:SS.');
+          state.queue.push({ id: 'snip_' + Math.random().toString(36).slice(2, 9), commandId: selectedId, vid, cancelAtMs, status: 'pending' });
+          await queueSave(state.queue);
+          refreshQueue();
+        },
+      });
+
+      ui.body.append(
+        S.h('div', { style: { fontWeight: 'bold', fontSize: '10px' }, text: 'Comandos que ainda dá pra cancelar' }), cmdHost,
+        timeInput, addBtn,
+        S.h('div', { style: { fontWeight: 'bold', fontSize: '10px', marginTop: '4px' }, text: 'Fila' }), queueHost,
+      );
+
+      await refreshCommands();
+      refreshQueue();
+
+      setInterval(async () => {
+        const now = S.serverTime.now();
+        for (const item of state.queue) {
+          if (item.status !== 'pending' || item.cancelAtMs - now > 5000 || state.armed.has(item.id)) continue;
+          state.armed.add(item.id);
+          S.serverTime.scheduleAt(item.cancelAtMs, async () => {
+            const res = await S.cancelCommand(item.vid, item.commandId);
+            item.status = res.ok ? 'done' : 'failed';
+            ctx.log.info(res.ok ? `Comando #${item.commandId} cancelado.` : `Falha ao cancelar #${item.commandId}: ${res.reason}`);
+            state.queue = state.queue.filter((i) => i.id !== item.id);
+            await queueSave(state.queue);
+            refreshQueue();
+          });
+        }
+      }, 3000);
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: market-exchange — Compra/Venda no Mercado (pontos premium)
+//
+// Usa a Troca Premium (screen=market&mode=exchange), não o mercado
+// entre jogadores. UNVERIFIED: nomes de campo baseados em
+// stefan2200/TWB (GPL-3, só referência de endpoint) — "sell_<recurso>"
+// confirmado no código deles; "buy_<recurso>" é suposição simétrica.
+// ============================================================
+(function registerMarketExchange() {
+  'use strict';
+  const TW = window.TWSuite;
+  const S = TW.shared;
+  const MODULE_ID = 'market-exchange';
+  const DEFAULTS = { mode: 'sell', resource: 'wood', amount: 1000, targetRate: 300, cycleMinutes: 30, dryRun: true };
+
+  TW.registerModule({
+    id: MODULE_ID,
+    name: 'Troca Premium',
+    screens: ['any'],
+    defaultEnabled: false,
+    async run(ctx) {
+      const vid = S.villageId();
+      if (!vid) return;
+      const ui = S.card(MODULE_ID, 'Troca Premium');
+      S.loop(`${MODULE_ID}:${vid}`, async () => {
+        const s = { ...DEFAULTS, ...(await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS)) };
+        const rates = await S.premiumExchangeRates(vid).catch(() => null);
+        if (!rates) { ui.setStatus('taxas indisponíveis (sem mercado premium aqui?)'); return; }
+        const rate = rates.rates && rates.rates[s.resource];
+        if (rate == null) { ui.setStatus('taxa do recurso não encontrada'); return; }
+
+        const worth = s.mode === 'sell' ? rate >= s.targetRate : rate <= s.targetRate;
+        if (!worth) { ui.setStatus(`taxa atual ${rate} — fora do alvo (${s.targetRate})`); return; }
+
+        if (s.dryRun) {
+          ctx.log.info(`(teste) ${s.mode === 'sell' ? 'venderia' : 'compraria'} ${s.amount} ${s.resource} (taxa ${rate})`);
+          ui.setStatus(`teste: ${s.mode} ${s.amount} ${s.resource} @ ${rate}`);
+          return;
+        }
+        const res = await S.premiumExchange(vid, s.mode, s.resource, s.amount);
+        if (!res.ok) { ctx.log.warn('Troca recusada:', res.reason); ui.setStatus(`recusado: ${res.reason}`); return; }
+        ctx.log.info(`Troca concluída: ${s.mode} ${s.amount} ${s.resource} @ ${rate}.`);
+        ui.setStatus(`trocado @ ${rate}`);
+      }, Math.max(10, DEFAULTS.cycleMinutes) * 60000, Math.max(10, DEFAULTS.cycleMinutes) * 60000 * 1.3);
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: paladin-trainer — Upar Paladino em Massa (RASCUNHO)
+//
+// Diferente dos outros módulos novos, este NÃO tenta comprar/treinar
+// nada de verdade — não temos nenhuma referência confiável (nem de
+// projeto aberto, nem de HAR) pra saber o endpoint real de evolução
+// do Paladino neste jogo. Em vez de chutar um ajaxaction e arriscar
+// gastar recursos de verdade num palpite errado, este módulo só
+// detecta a tela e relata o que vê — modo teste permanente até
+// alguém confirmar o mecanismo ao vivo (ver docs/verification-log.md).
+// ============================================================
+(function registerPaladinTrainer() {
+  'use strict';
+  const TW = window.TWSuite;
+  const S = TW.shared;
+  const MODULE_ID = 'paladin-trainer';
+
+  TW.registerModule({
+    id: MODULE_ID,
+    name: 'Upar Paladino (diagnóstico)',
+    screens: ['statue'],
+    defaultEnabled: false,
+    async run(ctx) {
+      const ui = S.card(MODULE_ID, 'Paladino');
+      ui.body.appendChild(S.h('div', { class: 'tws-test', text: 'Só diagnóstico — não compra nada ainda.' }));
+      const forms = document.querySelectorAll('form');
+      const buttons = [...document.querySelectorAll('input[type="submit"], button')].filter((b) => /treinar|comprar|equipar|livro/i.test(b.value || b.textContent || ''));
+      ui.body.appendChild(S.h('div', { class: 'tws-muted', text: `${forms.length} formulário(s), ${buttons.length} botão(ões) candidato(s) nesta tela.` }));
+      ui.setStatus(buttons.length ? `achei ${buttons.length} botão(ões)` : 'nada reconhecido');
+      ctx.log.info(`Diagnóstico do Paladino: ${forms.length} forms, botões candidatos: ${buttons.map((b) => (b.value || b.textContent || '').trim()).join(' | ') || '(nenhum)'}`);
     },
   });
 })();

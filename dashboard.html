@@ -671,6 +671,10 @@ textarea.field { height: auto; padding: 12px; resize: vertical; font-family: var
   <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4V3z"/></symbol>
   <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 1 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></symbol>
   <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3M14 9l2 2"/></symbol>
+  <symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 9.5c0-1.4 1.3-2.5 3-2.5s3 1 3 2.2-1 1.8-3 2.3-3 1.1-3 2.3 1.3 2.2 3 2.2 3-1.1 3-2.5"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3 12.5 12.5 3H20a1 1 0 0 1 1 1v7.5L11.5 21 3 12.5z"/><circle cx="15.5" cy="7.5" r="1.5"/></symbol>
+  <symbol id="i-wall" viewBox="0 0 24 24"><path d="M3 5h18M3 5v14M21 5v14M3 19h18M3 12h9M12 5v7M12 12h9M12 12v7"/></symbol>
+  <symbol id="i-exchange" viewBox="0 0 24 24"><path d="M4 8h13l-3-3M20 16H7l3 3"/></symbol>
   <symbol id="i-crest" viewBox="0 0 48 48"><path d="M24 4 40 10v12c0 10-7 18.5-16 22C15 40.5 8 32 8 22V10l16-6z" stroke="url(#g-ember)" stroke-width="2"/><path d="M16 17h16M24 17v17M18 28l12-8M18 20l12 8" stroke="url(#g-ember)" stroke-width="1.6" opacity=".55"/><circle cx="24" cy="24" r="3" fill="url(#g-ember)" stroke="none"/></symbol>
 </svg>
 
@@ -764,6 +768,7 @@ const MODULES = [
       dryRun: true, templates: [], activeTemplateId: null,
     },
     templates: true,
+    resetTargets: true,
     presets: [
       { id: 'leve', label: 'Leve', settings: { maxDistance: 8, cooldownMinutes: 60, maxConcurrentWaves: 1 } },
       { id: 'equilibrado', label: 'Equilibrado', settings: { maxDistance: 12, cooldownMinutes: 30, maxConcurrentWaves: 2 } },
@@ -824,6 +829,79 @@ const MODULES = [
       { key: 'unit', type: 'select', label: 'Unidade', options: UNITS },
       { key: 'amount', type: 'range', label: 'Quantidade', min: 1, max: 1000, step: 1, unit: 'un.' },
     ],
+  },
+  {
+    id: 'coin-mint', name: 'Cunhar Moedas', group: 'Economia', icon: 'coin', screen: 'Academia',
+    desc: 'Cunha moedas de ouro sozinho e, se quiser, puxa recursos das outras aldeias pra ter o suficiente.',
+    defaults: { cycleMinutes: 20, coinWood: 28000, coinStone: 30000, coinIron: 25000, maxPerCycle: 10, pullResources: false, pullKeepPercent: 30, pullMaxVillages: 15, dryRun: true },
+    presets: [
+      { id: 'so-cunhar', label: 'Só cunhar', settings: { pullResources: false } },
+      { id: 'cunhar-puxar', label: 'Cunhar + puxar recursos', settings: { pullResources: true } },
+    ],
+    hint: (s) => `até ${s.maxPerCycle}/ciclo${s.pullResources ? ' · puxa recursos' : ''}`,
+    fields: [
+      { key: 'maxPerCycle', type: 'range', label: 'Máximo por ciclo', min: 1, max: 50, step: 1, unit: 'moedas' },
+      { key: 'pullResources', type: 'switch', label: 'Puxar recursos das outras aldeias quando faltar' },
+      { key: 'pullKeepPercent', type: 'range', label: 'Reserva nas aldeias doadoras', min: 0, max: 80, step: 5, unit: '%' },
+    ],
+    note: 'UNVERIFIED — nunca testado ao vivo. Nasce em modo teste.',
+  },
+  {
+    id: 'market-exchange', name: 'Troca Premium', group: 'Economia', icon: 'exchange', screen: 'Mercado',
+    desc: 'Compra ou vende recursos por pontos premium quando a taxa estiver boa, sem você ficar checando.',
+    defaults: { mode: 'sell', resource: 'wood', amount: 1000, targetRate: 300, cycleMinutes: 30, dryRun: true },
+    presets: [
+      { id: 'vender-madeira', label: 'Vender madeira', settings: { mode: 'sell', resource: 'wood' } },
+      { id: 'comprar-ferro', label: 'Comprar ferro', settings: { mode: 'buy', resource: 'iron' } },
+    ],
+    hint: (s) => `${s.mode === 'sell' ? 'vende' : 'compra'} ${s.resource} · alvo ${s.targetRate}`,
+    fields: [
+      { key: 'mode', type: 'select', label: 'Operação', options: [{ value: 'sell', label: 'Vender' }, { value: 'buy', label: 'Comprar' }] },
+      { key: 'resource', type: 'select', label: 'Recurso', options: [{ value: 'wood', label: 'Madeira' }, { value: 'stone', label: 'Argila' }, { value: 'iron', label: 'Ferro' }] },
+      { key: 'amount', type: 'range', label: 'Quantidade por operação', min: 100, max: 20000, step: 100, unit: 'un.' },
+      { key: 'targetRate', type: 'range', label: 'Taxa alvo', min: 50, max: 500, step: 10, unit: '' },
+    ],
+    note: 'UNVERIFIED — endpoint de compra ("buy_recurso") é suposição, nunca confirmado. Venda tem mais base. Nasce em modo teste.',
+  },
+  {
+    id: 'wall-breaker', name: 'Derrubar Muralha', group: 'Ofensiva', icon: 'wall', screen: 'Praça de reunião',
+    desc: 'Manda catapultas mirando a muralha de alvos específicos antes do farm pesado.',
+    defaults: { targets: '', catapultCount: 4, escortUnit: 'none', escortAmount: 0, cooldownHours: 12, dryRun: true },
+    presets: [],
+    hint: (s) => `${(s.targets || '').split(/[\n;,]+/).filter(Boolean).length} alvo(s) · ${s.catapultCount} catapultas`,
+    fields: [
+      { key: 'targets', type: 'text', label: 'Alvos (X|Y, separados por ; )', placeholder: '500|500; 501|502' },
+      { key: 'catapultCount', type: 'range', label: 'Catapultas por envio', min: 1, max: 50, step: 1, unit: 'un.' },
+      { key: 'cooldownHours', type: 'range', label: 'Espera por alvo', min: 1, max: 72, step: 1, unit: 'h' },
+    ],
+    note: 'Alvo mirado na muralha via campo catapult_target — UNVERIFIED. Nasce em modo teste.',
+  },
+  {
+    id: 'snip-cancel', name: 'Snip / Cancelamento', group: 'Ofensiva', icon: 'x', screen: 'Qualquer tela',
+    desc: 'Agenda o cancelamento de um comando seu no segundo exato — a escolha de qual comando é sua, feita no jogo.',
+    defaults: { dryRun: true },
+    presets: [],
+    hint: () => 'Fila montada dentro do jogo',
+    fields: [],
+    note: 'A lista de comandos e a fila de cancelamentos agendados aparecem no painel do jogo, não aqui — esse módulo só liga/desliga a automação.',
+  },
+  {
+    id: 'command-labeler', name: 'Etiquetador de Comandos', group: 'Alertas', icon: 'tag', screen: 'Visão de comandos',
+    desc: 'Marca automaticamente os comandos que chegam quando você está na tela de comandos.',
+    defaults: { dryRun: true },
+    presets: [],
+    hint: () => 'Age só quando você abre a tela de Comandos',
+    fields: [],
+    note: 'UNVERIFIED — nunca confirmado se o botão se chama exatamente "Etiqueta" neste mundo.',
+  },
+  {
+    id: 'paladin-trainer', name: 'Upar Paladino (diagnóstico)', group: 'Exército', icon: 'shield', screen: 'Estátua',
+    desc: 'Ainda não evolui o paladino de verdade — só relata o que encontra na tela, até termos como confirmar o mecanismo real.',
+    defaults: { dryRun: true },
+    presets: [],
+    hint: () => 'Somente diagnóstico',
+    fields: [],
+    note: 'Sem referência confiável do endpoint de treino do paladino ainda — em vez de chutar e arriscar gastar recurso à toa, este módulo só olha a tela e avisa o que vê no log.',
   },
   {
     id: 'auto-collect', name: 'Coleta', group: 'Economia', icon: 'basket', screen: 'Coleta',
@@ -1482,9 +1560,15 @@ function tileHTML(m, cfg) {
   const lbl = presetLabel(m, cfg);
   const open = state.openFine.has(m.id);
   const fields = m.fields.map((f) => fieldHTML(m, f, cfg.settings)).join('');
-  const fine = (m.fields.length || m.note) ? `
+  const resetBtn = m.resetTargets
+    ? `<button class="btn-ghost btn-sm" data-act="reset-targets" style="margin-left:auto" type="button" title="Pede pra aba do jogo limpar o cooldown de alvos desta conta">${icon('bolt', 'sm')}Restaurar alvos</button>`
+    : '';
+  const fine = (m.fields.length || m.note || resetBtn) ? `
     <div class="fine-wrap ${open ? 'open' : ''}">
-      <button class="fine-toggle" data-fine="${m.id}" type="button">${icon('chev', 'sm')}Ajustes finos</button>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="fine-toggle" data-fine="${m.id}" type="button">${icon('chev', 'sm')}Ajustes finos</button>
+        ${resetBtn}
+      </div>
       <div class="fine-body">${fields}${m.note ? `<p class="note">${esc(m.note)}</p>` : ''}</div>
     </div>` : '';
   return `
@@ -1976,6 +2060,13 @@ function handleAct(act, el) {
       });
     case 'save-model': return openSaveModel();
     case 'remove': return confirmRemove([key]);
+    case 'reset-targets': {
+      if (!bridge.connected) { toast('Sincronize com o Tampermonkey primeiro (veja o painel de sincronização)', 'err'); return; }
+      bridgeCall('resetAutoFarmTargets', { accountKey: key })
+        .then(() => { addLog(`Pedido de restaurar alvos enviado para ${splitKey(key).nick}`); toast('Pedido enviado — a aba do jogo aplica no próximo ciclo (~8s)'); })
+        .catch((e) => toast(`Falha ao enviar pedido: ${e.message}`, 'err'));
+      return;
+    }
   }
 }
 

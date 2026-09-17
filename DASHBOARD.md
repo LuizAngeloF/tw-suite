@@ -4,7 +4,7 @@ Painel para cadastrar suas contas e escolher o que cada uma automatiza. O script
 
 ## Instalação
 
-1. Atualize o **TW Suite no Tampermonkey para a v1.4.0** ou mais nova.
+1. Atualize o **TW Suite no Tampermonkey para a v1.5.0** ou mais nova.
 2. Baixe a pasta do projeto (ou pelo menos `dashboard.html` + `start-dashboard.bat`, os dois juntos na mesma pasta).
 3. Dê **2 cliques em `start-dashboard.bat`**. Abre uma aba em `http://localhost:8787/dashboard.html` — use essa aba, não um arquivo aberto direto.
 4. O selo no topo deve mostrar **Sincronizado**. Deixe a janela preta do `.bat` aberta enquanto usar o dashboard — fechar ela desliga o servidor.
@@ -64,6 +64,16 @@ Depois que o script roda pelo menos uma vez numa conta (até ~90s após abrir o 
 4. No dashboard, confira se a conta está cadastrada com **exatamente** esse mesmo mundo e nick — a chave precisa bater dos dois lados.
 5. Ainda sem sincronizar? Use **"Usar código de sincronização"** no dashboard — copia um código, cole em `TW Suite → Importar código do dashboard` no jogo. Não depende de nenhuma permissão, mas é manual: repita sempre que mudar algo no dashboard.
 6. Depois de importar, abra o painel **TW Suite** de novo — "Último perfil aplicado" deve mostrar ✅ com a chave da conta. Se mostrar "sem perfil salvo", ele lista as chaves que reconhece — compare com a chave calculada do passo 3.
+
+## Módulos novos (v1.5.0)
+
+Seis módulos que faltavam: **Cunhar Moedas & Puxar Recursos**, **Troca Premium**, **Derrubar Muralha**, **Snip por Cancelamento**, **Etiquetador de Comandos** e um diagnóstico de **Upar Paladino** (esse último ainda não faz nada de verdade — só relata o que vê na tela, porque não tenho referência confiável do mecanismo real; me manda uma captura de rede de alguém treinando o paladino manualmente que eu termino).
+
+Todos nascem em **modo teste** e nenhum foi testado contra o jogo ainda — ligue o modo real um de cada vez e me avise o que funcionar ou falhar.
+
+## Restaurar alvos
+
+O botão "Restaurar alvos" do Auto Farm agora mostra o resultado direto na tela (antes só ia pro console, parecia não fazer nada). Também tem um botão igual no dashboard, ao lado de "Ajustes finos" — como o dashboard roda numa aba separada da do jogo, ele não limpa na hora: grava um pedido que a aba do jogo aplica sozinha no próprio ciclo (~8s depois).
 
 ## Limitações conhecidas
 

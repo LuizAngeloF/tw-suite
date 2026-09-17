@@ -111,8 +111,24 @@ O envio em si continua o mesmo mecanismo **VERIFIED** (`S.sendCommand`, os dois 
 - **Limite por hora** e **pausa noturna**: contagem simples de envios na última hora e janela de horário (local do navegador, não do servidor) configuráveis no dashboard — lógica nunca testada em uso real.
 - Alvos em ondas atualmente "no ar" ficam excluídos da lista de próximos alvos (evita mandar duas ondas pro mesmo bárbaro ao mesmo tempo).
 
+## Fase 7 — v1.5.0: os 6 módulos que faltavam + conserto do "Restaurar alvos"
+
+Pedido do usuário: implementar os recursos que só existiam no produto do Paulinho e nunca tiveram equivalente aqui. Seis módulos novos, nenhum testado ao vivo ainda — todos nascem em modo teste (exceto onde indicado):
+
+| Módulo | Mecanismo | Confiança |
+|---|---|---|
+| Cunhar Moedas & Puxar Recursos | `screen=snob`, `action=coin`/`reserve` (POST de formulário real) | UNVERIFIED — mesmo padrão do TWB, nunca testado |
+| Troca Premium | `ajaxaction=exchange_begin`/`exchange_confirm` em `screen=market` — `sell_<recurso>` confirmado no código do TWB, `buy_<recurso>` é suposição simétrica | UNVERIFIED, venda com mais base que compra |
+| Derrubar Muralha | Reusa `S.sendCommand` com o novo parâmetro `catapultTarget` → campo `catapult_target` no POST de confirmação | UNVERIFIED — nome do campo é convenção de scripts da comunidade, nunca visto no HTML real deste jogo. Degradação esperada se estiver errado: ataca normal, sem mirar a muralha (não devia dar erro) |
+| Snip por Cancelamento | Não tenta automatizar a decisão de *quando* snipar — só agenda o cancelamento de um comando escolhido pelo usuário, no segundo exato (`serverTime.scheduleAt` + `cancelCommand`, ambos já usados em outro lugar) | Mecanismo de cancelamento é o mesmo já existente; a *seleção da lista de comandos canceláveis* (`listCancelableCommands`, agora devolve `{id, href, label}` por linha da tabela) é nova e UNVERIFIED |
+| Etiquetador de Comandos | Clique DOM simples (marca todas as caixinhas + clica no botão "Etiqueta") — só roda quando o usuário está na tela `info_command`, não em background | UNVERIFIED — nunca confirmado se o botão se chama exatamente "Etiqueta" |
+| Upar Paladino | **Não implementado de verdade.** Sem nenhuma referência confiável do endpoint, o módulo só faz diagnóstico (lista formulários/botões da tela `statue` e loga no console) — evita chutar um `ajaxaction` e arriscar gastar recurso à toa. Precisa de uma captura HAR de alguém treinando o paladino manualmente pra virar um módulo de verdade, igual foi feito com o Auto Farm |
+
+**Conserto do "Restaurar alvos" (Auto Farm)**: o botão já funcionava (`storage.removeByPrefix`), mas só confirmava via `log.info` — invisível pra quem não está com o DevTools aberto. Agora mostra o resultado (quantidade restaurada, ou o erro) direto na tela do painel. Também adicionado um botão equivalente no dashboard: como o dashboard roda numa aba separada da do jogo, ele não chama o módulo diretamente — grava um pedido em `autoFarmResetRequests` (por conta) que a aba do jogo confere no próprio ciclo de atualização de ~8s e executa sozinha.
+
 ## Fases futuras (ainda não implementadas)
 
 - Auto Defesa: ainda no formato antigo (detecta "ataque" como texto solto na página — falso-positivo praticamente garantido). Candidato a reescrever com o mesmo parser de `info_command` do live-status, uma vez confirmado.
 - Notificações: só Discord; WhatsApp via CallMeBot já está pronto em `shared.notify()` mas sem UI no dashboard/painel nativo pra configurar telefone/apikey.
+- Upar Paladino: precisa de referência ao vivo (HAR) pra sair do diagnóstico e virar automação de verdade.
 - Recursos citados pelo usuário mas ainda não implementados: Snip por Cancelamento, Cunhar Moedas (rascunho existe mas não integrado), Etiquetador de Comandos, Compra/Venda no mercado, Derrubar Muralha, Farm pelo Mapa, Upar Paladino em Massa.
