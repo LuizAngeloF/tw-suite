@@ -9,11 +9,11 @@ Não é afiliado à InnoGames. Automatizar o jogo viola as regras oficiais do Tr
 **Fase 0 (núcleo) e Fase 1 (Auto Farm) prontas e confirmadas ao vivo.**
 
 - **Núcleo**: menu, armazenamento, sincronização de horário do servidor, carregador de módulos.
-- **Auto Farm**: ativo na tela da Praça de Reunião (`screen=place`). Lê `/map/village.txt` (dados públicos do mundo) pra achar aldeias bárbaras perto da aldeia atual, mostra a lista num painel com distância, e ao clicar "Enviar" preenche o formulário real de ataque, espera o jogo resolver o alvo e chegar na tela de confirmação. **Sobe desligado por padrão** (ative em "TW Suite" → módulo "Auto Farm (sem premium)") e em **modo teste (dry-run)** — nada é enviado de verdade até você desmarcar essa opção no painel do próprio módulo.
+- **Auto Farm**: ativo na tela da Praça de Reunião (`screen=place`). Lê `/map/village.txt` (dados públicos do mundo) pra achar aldeias bárbaras perto da aldeia atual, mostra a lista num painel com distância, e ao clicar "Enviar" manda as duas requisições reais de ataque direto via `fetch()` (não simula clique — depois de várias tentativas sem sucesso, descobrimos via HAR que o envio real é uma submissão de formulário genuína, então replicamos ela). **Sobe desligado por padrão** (ative em "TW Suite" → módulo "Auto Farm (sem premium)") e em **modo teste (dry-run)** — nada é enviado de verdade até você desmarcar essa opção no painel do próprio módulo.
   - Não depende do Assistente de Saque nativo (que é premium neste mundo).
-  - Testado ponta a ponta: descoberta de alvo → preenchimento → resolução do alvo → tela de confirmação → botão "Enviar ataque" identificado.
-  - **Auto-confirmar continua desligado por padrão** mesmo já verificado — é uma ação definitiva (as tropas saem de verdade), então é opt-in por segurança. Ative marcando "Auto-confirmar envio" no painel do módulo quando tiver certeza. **Em teste ainda: pode ser que o jogo bloqueie cliques automáticos nesse passo específico** (proteção anti-bot na ação final) — ver [`docs/verification-log.md`](docs/verification-log.md) pro status mais recente.
-  - Um alvo só sai da lista depois de um envio realmente confirmado — clicar "Enviar" e não confirmar (manual ou auto) não remove nada. Botão **"Restaurar alvos"** no painel limpa o cooldown da aldeia atual, trazendo de volta qualquer alvo já tentado.
+  - Não depende de simular clique em nada — os tokens/campos são lidos ao vivo do formulário e da resposta do jogo a cada envio, não fixos no código.
+  - **Ainda não testado ao vivo** o fluxo novo (v0.4.0) enviando de verdade — ver [`docs/verification-log.md`](docs/verification-log.md) pro status mais recente e o payload completo capturado.
+  - Um alvo só sai da lista depois de um envio realmente confirmado. Botão **"Restaurar alvos"** no painel limpa o cooldown da aldeia atual, trazendo de volta qualquer alvo já tentado.
 
 Módulos planejados, em ordem: ~~Auto Farm~~ → Agendador de Comandos → Construção Automática → Notificações (Discord/WhatsApp).
 

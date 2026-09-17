@@ -21,23 +21,52 @@ Como confirmar um item: instalar o build atual, logar normalmente no `tribalwars
 |---|---|---|---|
 | `GET /map/village.txt` (mesma origem, sem login) | `getVillageIndex` | **VERIFIED** (2026-09-19, via curl direto) | HTTP 200, ~3.3MB, 69301 linhas, formato `id,nome,x,y,dono,pontos,rank`. `dono=0` confirmado como aldeia bárbara (linha de exemplo: `4,Aldeia+de+bárbaros,553,473,0,233,0`). |
 | `game_data.player.id`, `game_data.village.{id,x,y}` | Identificar aldeia/jogador atual (`findTargets`) | **VERIFIED** (2026-09-19, Opera GX) | Dump ao vivo da tela `place` confirmou os campos e formato exatos. |
-| `#inputx` / `#inputy` (coordenada alvo) | `fillAndSubmitAttack` | **VERIFIED** (2026-09-19, Opera GX) | Inputs de texto simples, confirmados no dump do formulário. |
-| `#unit_input_<tropa>` com atributo `data-all-count` | Preencher quantidade + ler disponível (`fillAndSubmitAttack`, checagem de disponibilidade) | **VERIFIED** (2026-09-19, Opera GX) | Confirmado pra `spy`, `light`, `marcher`, `heavy` (todos com `data-all-count="0"` nessa conta em proteção de iniciante — mecanismo confirmado, só não há tropa ainda pra testar envio real). |
-| `#target_attack` (botão "Ataque") | Disparar o envio (`fillAndSubmitAttack`) | **VERIFIED** (2026-09-19, Opera GX) | `<input type="submit" id="target_attack" name="attack" value="Ataque">`, confirmado no dump. |
-| Preencher `#inputx`/`#inputy` NÃO seleciona o alvo na hora | `waitForTargetResolved` | **VERIFIED** (2026-09-19, Opera GX) | O jogo resolve a coordenada pra um alvo de verdade de forma assíncrona — a URL ganha `?target=<id_da_aldeia>` quando termina (ex.: `target=73362`). O primeiro teste falhou porque clicávamos em "Ataque" antes disso terminar (erro "selecione um alvo"); corrigido esperando `?target=` aparecer antes de continuar. |
-| A "tela" de confirmação é uma transição client-side, não uma navegação real | Arquitetura do módulo (removida a detecção por `try=confirm` na URL) | **VERIFIED** (2026-09-19, Opera GX) | Não existe `screen=place&try=confirm` nesta versão do jogo — a URL não muda de um jeito detectável em `run()` (que só roda uma vez por carregamento real de página). O clique em "Enviar ataque" agora é tratado dentro do próprio fluxo de envio (`fillAndSubmitAttack` → `waitForConfirmButton`), não como uma tela separada. |
-| `#troop_confirm_submit` (botão final "Enviar ataque") | `waitForConfirmButton` / clique de auto-confirm | **VERIFIED** (2026-09-19, Opera GX) | `<input type="submit" id="troop_confirm_submit" name="submit_confirm" class="troop_confirm_go btn btn-attack" value="Enviar ataque">`, confirmado no dump da tela de confirmação real (chegada a um alvo bárbaro em 706\|568, duração 0:40:15). `autoConfirm` segue desligado por padrão mesmo assim — é opt-in por ser uma ação definitiva, não por incerteza técnica. |
+| `#inputx` / `#inputy` (coordenada alvo), `#unit_input_<tropa>` com `data-all-count` | Ler disponibilidade de tropa antes de enviar | **VERIFIED** (2026-09-19, Opera GX) | Inputs de texto simples com `data-all-count` mostrando o disponível, confirmados no dump do formulário real. |
 
-**Fase 1 considerada verificada ponta a ponta** (descoberta de alvo → preencher formulário → resolver alvo → enviar → tela de confirmação → botão final identificado).
+### Histórico: tentativas de simular clique (abandonadas na v0.4.0)
 
-**Teste com `autoConfirm` ligado (2026-09-19):** chegou até a tela de confirmação, mas não clicou em "Enviar ataque" — suspeita de corrida de novo (achou o botão rápido demais, antes de estar de fato pronto/vivo no DOM). Corrigido em v0.3.1: `waitForElement` agora exige o elemento **visível** (não só presente), e `waitForConfirmButton` espera 350ms depois de achá-lo e reconsulta o seletor antes de considerar válido — e o clique em si reconsulta o seletor mais uma vez na hora, pra não clicar num nó que a página já substituiu.
+Entre v0.3.0 e v0.3.4 o módulo tentou automatizar o envio **simulando interação na UI real** — preencher `#inputx`/`#inputy`, clicar `#target_attack` ("Ataque"), esperar a tela de confirmação, clicar `#troop_confirm_submit` ("Enviar ataque"). Registro do que foi tentado, pra quem for mexer nisso de novo no futuro:
 
-**Retestado, ainda não funcionou (v0.3.1).** Hipótese revisada: pode não ser timing — é possível que o jogo rejeite cliques sintéticos (`.click()` via JS, sem `isTrusted`) especificamente na ação final de envio, como proteção anti-bot deliberada (faria sentido: é exatamente o ponto em que as tropas saem de verdade). v0.3.2 adiciona um diagnóstico direto: depois do clique automático, espera 800ms e verifica se `#troop_confirm_submit` ainda está visível na tela — se estiver, avisa no log que o clique provavelmente não funcionou, em vez de assumir sucesso. Isso vai confirmar ou descartar a hipótese no próximo teste. Se for confirmado que cliques sintéticos são bloqueados nessa etapa específica, `autoConfirm` pode não ser tecnicamente viável — restando só a confirmação manual (que já funciona normalmente).
+1. `.click()` simples no botão de confirmação — não funcionou, botão continuava na tela.
+2. Suspeita de corrida (botão "achado" antes de estar pronto) — corrigido esperando visibilidade + reconsulta antes de clicar (v0.3.1). Não resolveu.
+3. Suspeita de clique sem coordenadas reais — trocado por mousedown/mouseup/click com coordenadas do centro do botão (v0.3.3). Não resolveu.
+4. Suspeita de que o botão não estava dentro de um `<form>` de verdade — trocado por `form.requestSubmit()` (v0.4.0-tentativa). Não resolveu.
+5. **Causa raiz encontrada via HAR do Chrome DevTools (2026-09-19), capturando um envio genuíno feito manualmente**: as duas etapas (`screen=place&try=confirm` e `screen=place&action=command`) são **submissões de formulário reais** (`_resourceType: "document"`, POST com reload de página completo) — não AJAX, não SPA. Nenhuma das tentativas de simular clique conseguia disparar essa navegação real, por motivo não totalmente esclarecido (user activation do navegador expirando durante as esperas assíncronas é a hipótese mais provável, mas não foi isolada com certeza).
 
-Também corrigido nessa versão: o cooldown de um alvo só é gravado (e o alvo removido da lista) depois de um envio **realmente confirmado**, não mais assim que chega na tela de confirmação — antes disso, "Enviar" numa aldeia e não confirmar (manual ou por falha do auto-confirm) fazia o alvo sumir da lista sem o ataque ter saído de verdade. Adicionado botão "Restaurar alvos" no painel pra limpar o cooldown da aldeia atual sob demanda.
+**Decisão**: abandonar simulação de clique pra essa etapa. Ver seção seguinte.
+
+### Abordagem final (v0.4.0): replicar as requisições via `fetch()`
+
+Com o HAR completo (exportado com filtro "All", não só "Fetch/XHR" — o filtro anterior escondia as navegações de documento) foi possível capturar o payload **exato** das duas requisições de um envio real e bem-sucedido:
+
+**Etapa 1** — `POST game.php?village=80995&screen=place&try=confirm`:
+```
+b54d938573939eca8eea70=99832682b54d93   (campo escondido de nome ALEATÓRIO — token anti-fraude)
+template_id=
+source_village=80995
+spear=1  sword=  axe=  archer=  spy=  light=  marcher=  heavy=  ram=  catapult=  knight=  snob=
+x=703  y=566  target_type=coord  input=
+attack=Ataque
+```
+
+**Etapa 2** — `POST game.php?village=80995&screen=place&action=command` (campos vindos da RESPOSTA da etapa 1):
+```
+attack=true
+ch=2f06dec35d8a4e30872ab4c878211191:be79c4575ae063d77161d16607b1a0c0a407fb20bff7a9a691cd80eff5b9e873
+cb=troop_confirm_submit
+x=703  y=566  source_village=80995  village=80995
+spear=1  sword=0  axe=0  ... (todas as tropas, 0 pras não usadas — não vazio como na etapa 1)
+building=main
+submit_confirm=Enviar+ataque
+h=ffbbc10a
+```
+
+**VERIFIED** (2026-09-19) — payload real de um envio genuíno bem-sucedido, capturado via HAR. Implementado em `submitAttackStep1`/`submitAttackStep2`/`submitAttack`: os campos são lidos ao vivo do formulário real da página (etapa 1) e da resposta HTML da etapa 1 (etapa 2, via `DOMParser`) — nunca fixos no código, pra não quebrar se os tokens/nomes mudarem. `autoConfirm` como toggle separado foi removido: como o envio agora é determinístico (POST direto, não depende de clique funcionar ou não), a única opção relevante continua sendo `dryRun`.
+
+**Ainda não testado**: o próprio fluxo `fetch()` (v0.4.0) precisa de teste ao vivo — as etapas individuais foram verificadas via HAR de uma ação manual, mas o código novo ainda não foi confirmado enviando de verdade.
 
 ## Fases futuras (ainda não implementadas)
 
-- Fase 2 (Agendador): a duração de viagem já aparece na mesma tela de confirmação já verificada acima ("Duração: 0:40:15", "Chegada: hoje às ...") — falta só achar o seletor exato desses campos pra ler programaticamente.
+- Fase 2 (Agendador): a duração de viagem e hora de chegada já vêm na resposta da etapa 1 (`submitAttackStep1`) — dá pra extrair de lá em vez de precisar de um seletor novo. O agendador provavelmente também deve usar `fetch()` direto (`submitAttack`) na hora certa, em vez de tentar clicar em algo.
 - Fase 3 (Construção automática): estrutura da fila de construção e convenção de id/link por edifício — não identificado ainda.
 - Fase 4 (Notificações): seletor do indicador de ataque chegando e do overlay de captcha/proteção anti-bot — não identificado ainda.

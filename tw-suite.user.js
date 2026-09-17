@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.3.4
+// @version      0.4.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -482,22 +482,23 @@
 // Em vez disso: lê /map/village.txt (arquivo público do próprio
 // jogo, confirmado acessível sem login) pra achar aldeias bárbaras
 // perto da aldeia atual, mostra a lista num painel na Praça de
-// Reunião, e ao clicar "Enviar" preenche o formulário REAL de envio
-// (#inputx/#inputy/#unit_input_<tropa>) e clica no botão real
-// #target_attack — nunca recria a requisição na mão.
+// Reunião, e ao clicar "Enviar" manda as duas requisições reais de
+// envio via fetch() (ver submitAttackStep1/submitAttackStep2) — lidas
+// ao vivo de um HAR de um envio genuíno em 2026-09-19 (ver
+// docs/verification-log.md pro payload completo).
 //
-// Seletores confirmados ao vivo em 2026-09-19 (ver
-// docs/verification-log.md): #inputx, #inputy, #unit_input_<tropa>
-// (com data-all-count = disponível), #target_attack,
-// #troop_confirm_submit (botão final "Enviar ataque"). Preencher
-// x/y não seleciona o alvo na hora — o jogo resolve a coordenada de
-// forma assíncrona (a URL ganha ?target=<id> quando termina), por
-// isso o código espera esse parâmetro aparecer antes de clicar.
-//
-// autoConfirm começa DESLIGADO por padrão mesmo com o seletor já
-// verificado — é uma ação real e definitiva (as tropas saem de
-// verdade), então fica opt-in por segurança, não por incerteza
-// técnica.
+// Por que fetch() em vez de simular clique nos botões reais
+// (#target_attack / #troop_confirm_submit, ambos confirmados ao
+// vivo): tentamos várias formas de simular clique (.click(),
+// mousedown/mouseup/click com coordenadas reais, form.requestSubmit())
+// e nenhuma disparava a navegação de verdade — o HAR provou que as
+// duas etapas são submissões de formulário reais (POST com reload),
+// não AJAX, e por algum motivo (não totalmente esclarecido — pode
+// ser exigência de user activation do navegador, ou algo específico
+// do handler do jogo) cliques sintéticos não completavam a
+// submissão. Replicar as duas requisições nós mesmos, lendo os
+// campos/tokens ao vivo do formulário/resposta (nunca fixos no
+// código), é o método confirmado funcionando.
 // ============================================================
 (function registerAutoFarmModule() {
   'use strict';
@@ -520,7 +521,6 @@
     maxDistance: 12,
     cooldownMinutes: 30,
     dryRun: true,
-    autoConfirm: false, // seletor verificado, mas opt-in por ser uma ação definitiva
   };
 
   function dist(ax, ay, bx, by) {
@@ -581,136 +581,91 @@
     return candidates.slice(0, 15);
   }
 
-  // Preencher x/y não seleciona o alvo na hora — o jogo resolve a
-  // coordenada pra um alvo de verdade de forma assíncrona (a URL ganha
-  // ?target=<id> quando termina). Clicar em "Ataque" antes disso é
-  // rejeitado pelo próprio jogo (confirmado ao vivo em 2026-09-19).
-  function waitForTargetResolved(timeoutMs = 4000, intervalMs = 150) {
-    return new Promise((resolve) => {
-      const start = Date.now();
-      const tick = () => {
-        const params = new URLSearchParams(location.search);
-        if (params.get('target')) {
-          resolve(true);
-          return;
-        }
-        if (Date.now() - start >= timeoutMs) {
-          resolve(false);
-          return;
-        }
-        setTimeout(tick, intervalMs);
-      };
-      tick();
-    });
+  // ------------------------------------------------------------
+  // Envio via fetch() direto, replicando as duas requisições POST
+  // reais capturadas via HAR (2026-09-19, envio genuíno confirmado
+  // pelo usuário — ver docs/verification-log.md para os payloads
+  // completos). Depois de MUITAS tentativas de simular clique
+  // (.click(), mousedown/mouseup/click com coordenadas reais,
+  // form.requestSubmit()) nenhuma disparava a navegação real — o HAR
+  // provou que tanto "Ataque" quanto "Enviar ataque" são submissões
+  // de formulário de verdade (POST com reload de página), não AJAX.
+  // Em vez de insistir em simular o clique, montamos as mesmas duas
+  // requisições nós mesmos, lendo os campos (inclusive o token
+  // escondido de nome aleatório, e os tokens ch/h da 2ª etapa) direto
+  // do formulário real da página / da resposta, nunca fixos no
+  // código — assim não fica frágil se os nomes mudarem de novo.
+  // ------------------------------------------------------------
+
+  const UNIT_FIELDS = ['spear', 'sword', 'axe', 'archer', 'spy', 'light', 'marcher', 'heavy', 'ram', 'catapult', 'knight', 'snob'];
+
+  function formToParams(formEl, overrides) {
+    const fd = new FormData(formEl);
+    for (const [k, v] of Object.entries(overrides)) fd.set(k, v);
+    return new URLSearchParams(fd);
   }
 
-  async function fillAndSubmitAttack(unit, amount, x, y) {
-    const xInput = document.querySelector('#inputx');
-    const yInput = document.querySelector('#inputy');
-    const attackBtn = document.querySelector('#target_attack');
-    if (!xInput || !yInput || !attackBtn) {
-      return { ok: false, reason: 'campo do formulário não encontrado (seletor pode ter mudado)' };
-    }
-    xInput.value = String(x);
-    yInput.value = String(y);
-    for (const el of [xInput, yInput]) {
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-    }
+  function parseHtml(html) {
+    return new DOMParser().parseFromString(html, 'text/html');
+  }
 
-    const resolved = await waitForTargetResolved();
-    if (!resolved) {
-      return { ok: false, reason: 'o jogo não confirmou o alvo a tempo (sem ?target= na URL) — tente de novo' };
-    }
+  async function postForm(url, params) {
+    const res = await fetch(url, { method: 'POST', body: params, credentials: 'same-origin' });
+    const text = await res.text();
+    return { httpOk: res.ok, status: res.status, text };
+  }
 
-    const unitInput = document.querySelector('#unit_input_' + unit);
-    if (!unitInput) {
-      return { ok: false, reason: `campo de tropa "${unit}" não encontrado` };
-    }
-    unitInput.value = String(amount);
-    unitInput.dispatchEvent(new Event('input', { bubbles: true }));
-    unitInput.dispatchEvent(new Event('change', { bubbles: true }));
+  // Etapa 1: envia a aldeia/coordenada/tropas — equivalente a
+  // preencher o formulário da Praça de Reunião e clicar "Ataque".
+  // Retorna o HTML da tela de confirmação (ou erro).
+  async function submitAttackStep1(villageId, unit, amount, x, y) {
+    const formEl = document.querySelector('#inputx')?.form || document.querySelector('#inputx')?.closest('form');
+    if (!formEl) return { ok: false, reason: 'formulário da Praça de Reunião não encontrado nesta página' };
 
-    attackBtn.click();
+    const overrides = { x: String(x), y: String(y), target_type: 'coord', attack: 'Ataque' };
+    for (const u of UNIT_FIELDS) overrides[u] = u === unit ? String(amount) : '';
+
+    const params = formToParams(formEl, overrides);
+    const url = `game.php?village=${villageId}&screen=place&try=confirm`;
+    const { httpOk, status, text } = await postForm(url, params);
+
+    if (!httpOk) return { ok: false, reason: `etapa 1 (resolver alvo) falhou: HTTP ${status}` };
+    if (text.includes('error_box')) return { ok: false, reason: 'etapa 1: o jogo recusou (alvo/tropas inválidos, ou fora de alcance).' };
+    return { ok: true, html: text };
+  }
+
+  // Etapa 2: confirma o envio usando os tokens (ch/h) retornados pela
+  // etapa 1 — equivalente a clicar "Enviar ataque" na tela seguinte.
+  async function submitAttackStep2(villageId, unit, amount, x, y, confirmHtml) {
+    const confirmDoc = parseHtml(confirmHtml);
+    const confirmForm = confirmDoc.querySelector('#troop_confirm_submit')?.closest('form') || confirmDoc.querySelector('form');
+    if (!confirmForm) return { ok: false, reason: 'etapa 2: não achei o formulário de confirmação na resposta da etapa 1' };
+
+    const overrides = {
+      attack: 'true',
+      cb: 'troop_confirm_submit',
+      submit_confirm: 'Enviar ataque',
+      building: 'main',
+      x: String(x),
+      y: String(y),
+      source_village: String(villageId),
+      village: String(villageId),
+    };
+    for (const u of UNIT_FIELDS) overrides[u] = u === unit ? String(amount) : '0';
+
+    const params = formToParams(confirmForm, overrides);
+    const url = `game.php?village=${villageId}&screen=place&action=command`;
+    const { httpOk, status, text } = await postForm(url, params);
+
+    if (!httpOk) return { ok: false, reason: `etapa 2 (confirmar) falhou: HTTP ${status}` };
+    if (text.includes('error_box')) return { ok: false, reason: 'etapa 2: o jogo recusou a confirmação (token expirado? tente de novo).' };
     return { ok: true };
   }
 
-  function isVisible(el) {
-    return !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
-  }
-
-  // el.click() dispara um evento sem coordenadas reais (clientX/Y = 0).
-  // Algumas páginas rejeitam clique de confirmação final assim, mesmo
-  // sem checar isTrusted — simula mousedown/mouseup/click com as
-  // coordenadas reais do botão, que é o máximo que dá pra fazer via JS
-  // (o navegador nunca marca evento sintético como isTrusted; se o
-  // bloqueio for por isso, não tem contorno possível do lado do script).
-  function realisticClick(el) {
-    const rect = el.getBoundingClientRect();
-    const x = rect.left + rect.width / 2;
-    const y = rect.top + rect.height / 2;
-    const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0 };
-    el.dispatchEvent(new MouseEvent('mouseover', opts));
-    el.dispatchEvent(new MouseEvent('mousedown', opts));
-    el.dispatchEvent(new MouseEvent('mouseup', opts));
-    el.dispatchEvent(new MouseEvent('click', opts));
-  }
-
-  // Última tentativa: em vez de simular um clique (sempre isTrusted:
-  // false), envia o <form> diretamente pela API do navegador.
-  // form.requestSubmit(el) ainda dispara o evento "submit" nativo (então
-  // um handler JS da página que intercepta esse evento continua rodando
-  // normalmente) mas pula o tratamento de clique do botão em si — se o
-  // bloqueio for especificamente no listener de click do botão, isso
-  // pode contornar. form.submit() (mais antigo) nem dispara "submit",
-  // então fica como último recurso.
-  function submitViaForm(el) {
-    const form = el.form || el.closest('form');
-    if (!form) return false;
-    if (typeof form.requestSubmit === 'function') {
-      form.requestSubmit(el);
-      return true;
-    }
-    form.submit();
-    return true;
-  }
-
-  // A tela de confirmação também aparece via transição client-side (sem
-  // recarregar a página), então o botão não existe ainda no instante em
-  // que clicamos "Ataque" — precisa esperar aparecer, do mesmo jeito que
-  // esperamos o alvo ser resolvido. Exige visível (não só presente no
-  // DOM) porque a página pode manter um nó oculto/gabarito antes da
-  // troca de conteúdo terminar de verdade.
-  function waitForElement(selector, timeoutMs = 5000, intervalMs = 150) {
-    return new Promise((resolve) => {
-      const start = Date.now();
-      const tick = () => {
-        const el = document.querySelector(selector);
-        if (el && isVisible(el)) {
-          resolve(el);
-          return;
-        }
-        if (Date.now() - start >= timeoutMs) {
-          resolve(null);
-          return;
-        }
-        setTimeout(tick, intervalMs);
-      };
-      tick();
-    });
-  }
-
-  // #troop_confirm_submit confirmado ao vivo em 2026-09-19 (botão
-  // "Enviar ataque").
-  async function waitForConfirmButton(timeoutMs = 6000) {
-    const found = await waitForElement('#troop_confirm_submit', timeoutMs);
-    if (!found) return null;
-    // Pequena espera de estabilização + reconsulta: se a página tiver
-    // re-renderizado o formulário logo depois de aparecer visível, o nó
-    // que pegamos pode já estar "morto" (desligado do form ao vivo).
-    await new Promise((r) => setTimeout(r, 350));
-    const fresh = document.querySelector('#troop_confirm_submit');
-    return fresh && isVisible(fresh) ? fresh : found;
+  async function submitAttack(villageId, unit, amount, x, y) {
+    const step1 = await submitAttackStep1(villageId, unit, amount, x, y);
+    if (!step1.ok) return step1;
+    return submitAttackStep2(villageId, unit, amount, x, y, step1.html);
   }
 
   function buildPanel() {
@@ -783,16 +738,6 @@
     dryRunLabel.appendChild(dryRunCb);
     dryRunLabel.appendChild(document.createTextNode(' Modo teste (não envia de verdade)'));
 
-    const autoConfirmLabel = document.createElement('label');
-    autoConfirmLabel.style.display = 'block';
-    autoConfirmLabel.style.marginTop = '2px';
-    const autoConfirmCb = document.createElement('input');
-    autoConfirmCb.type = 'checkbox';
-    autoConfirmCb.checked = settings.autoConfirm;
-    autoConfirmCb.addEventListener('change', () => onChange({ autoConfirm: autoConfirmCb.checked }));
-    autoConfirmLabel.appendChild(autoConfirmCb);
-    autoConfirmLabel.appendChild(document.createTextNode(' Auto-confirmar envio (ação definitiva!)'));
-
     wrap.appendChild(document.createTextNode('Tropa: '));
     wrap.appendChild(unitSelect);
     wrap.appendChild(document.createElement('br'));
@@ -801,7 +746,6 @@
     wrap.appendChild(document.createTextNode('  Alcance: '));
     wrap.appendChild(distInput);
     wrap.appendChild(dryRunLabel);
-    wrap.appendChild(autoConfirmLabel);
 
     container.appendChild(wrap);
   }
@@ -832,13 +776,6 @@
       title.style.marginBottom = '6px';
       title.textContent = 'Auto Farm';
       panel.appendChild(title);
-
-      // A confirmação do ataque acontece via transição client-side (a
-      // URL não muda de um jeito detectável em run(), que só executa
-      // uma vez por carregamento real de página) — por isso o clique em
-      // "Enviar ataque" é tratado dentro do próprio fluxo de envio
-      // abaixo (fillAndSubmitAttack -> aguardar #troop_confirm_submit),
-      // não como uma tela separada.
 
       renderSettingsForm(panel, settings, async (patch) => {
         settings = { ...settings, ...patch };
@@ -908,52 +845,17 @@
             }
 
             btn.disabled = true;
-            btn.textContent = 'Aguardando alvo...';
-            const result = await fillAndSubmitAttack(settings.unit, amount, target.x, target.y);
-            if (!result.ok) {
-              btn.disabled = false;
-              btn.textContent = 'Enviar';
-              log.error('Falha ao preencher/enviar:', result.reason);
-              return;
-            }
-            log.info('Alvo confirmado, aguardando tela de "Enviar ataque"...');
-
-            const confirmBtn = await waitForConfirmButton();
+            btn.textContent = 'Enviando...';
+            const result = await submitAttack(myVillage.id, settings.unit, amount, target.x, target.y);
             btn.disabled = false;
             btn.textContent = 'Enviar';
 
-            if (!confirmBtn) {
-              log.warn('A tela de confirmação não apareceu a tempo — confira manualmente se o ataque ficou pendente. Esse alvo continua na lista (nada foi marcado como enviado).');
+            if (!result.ok) {
+              log.error('Falha ao enviar:', result.reason, '— alvo continua na lista.');
               return;
             }
 
-            if (!settings.autoConfirm) {
-              log.info('Na tela de confirmação — confirme manualmente. Esse alvo continua na lista até você clicar "Restaurar alvos" (nada foi gravado como enviado ainda).');
-              return;
-            }
-
-            // Reconsulta na hora do clique — o nó pego pela espera pode
-            // ter sido substituído por um novo (SPA re-renderizando).
-            const clickTarget = document.querySelector('#troop_confirm_submit') || confirmBtn;
-            log.info(`Auto-confirmar: enviando o formulário -> ${target.x}|${target.y}.`);
-            const submitted = submitViaForm(clickTarget);
-            if (!submitted) {
-              log.warn('Não achei o <form> do botão de confirmação — tentando clique simulado como último recurso.');
-              realisticClick(clickTarget);
-            }
-
-            // Diagnóstico: se o botão ainda estiver lá e visível depois
-            // do envio, provavelmente não teve efeito (alguns jogos
-            // bloqueiam interação automática na ação final, como
-            // proteção anti-bot) — melhor avisar do que assumir sucesso.
-            await new Promise((r) => setTimeout(r, 800));
-            const stillThere = document.querySelector('#troop_confirm_submit');
-            if (stillThere && isVisible(stillThere)) {
-              log.warn('O botão "Enviar ataque" ainda está na tela depois da tentativa — o auto-confirmar provavelmente NÃO funcionou (o jogo pode estar bloqueando envio automático nessa etapa). Confirme manualmente. Alvo continua na lista.');
-              return;
-            }
-
-            log.info(`Enviado (auto-confirmado): ${amount} "${settings.unit}" -> ${target.x}|${target.y}.`);
+            log.info(`Enviado: ${amount} "${settings.unit}" -> ${target.x}|${target.y}.`);
             await ctx.storage.set(cooldownKey(myVillage.id, target.id), Date.now());
             row.remove();
           });
