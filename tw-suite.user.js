@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.1.0
+// @version      0.1.1
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -10,6 +10,7 @@
 // @grant        GM_getValue
 // @grant        GM.setValue
 // @grant        GM.getValue
+// @grant        unsafeWindow
 // @run-at       document-end
 // @updateURL    https://raw.githubusercontent.com/LuizAngeloF/tw-suite/main/tw-suite.user.js
 // @downloadURL  https://raw.githubusercontent.com/LuizAngeloF/tw-suite/main/tw-suite.user.js
@@ -104,11 +105,16 @@
   // ============================================================
   const gameApi = (() => {
     function getGameData() {
-      if (typeof window.game_data === 'undefined') {
-        log.warn('game_data não encontrado nesta página — confirme se o jogo realmente carregou aqui.');
+      // O Tampermonkey roda o script num contexto isolado da página (sandbox):
+      // window.game_data do script NÃO é o game_data que o jogo criou. É
+      // preciso ler via unsafeWindow para enxergar o global real da página.
+      // (Confirmado ao vivo em 2026-09 — ver docs/verification-log.md.)
+      const gd = (typeof unsafeWindow !== 'undefined' && unsafeWindow.game_data) || window.game_data;
+      if (typeof gd === 'undefined') {
+        log.warn('game_data não encontrado nesta página (nem via unsafeWindow) — confirme se o jogo realmente carregou aqui.');
         return null;
       }
-      return window.game_data;
+      return gd;
     }
 
     function getCurrentScreen() {

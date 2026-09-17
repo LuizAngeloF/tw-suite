@@ -8,10 +8,10 @@ Como confirmar um item: instalar o build atual, logar normalmente no `tribalwars
 
 | Item | Uso no código | Status | Observação |
 |---|---|---|---|
-| `#menu_row2` / `#menu_row` | Entrada de menu nativa (`ui.injectMenuEntry`) | UNVERIFIED | Convenção conhecida da engine clássica do Tribal Wars, nunca confirmada nesta conta. Se nenhum dos dois existir, o script cai automaticamente no botão flutuante (sempre funciona, não depende de seletor nenhum). |
-| `window.game_data` | Leitura de aldeia/mundo/tela (`gameApi.getGameData`) | UNVERIFIED | Praticamente certo de existir (é a convenção universal da engine), mas o formato exato (`.screen`, `.time_generated`) não foi confirmado. |
-| `game_data.time_generated` | Cálculo do offset de servidor (`serverTime.computeOffsetFromGameData`) | UNVERIFIED | Se o campo não existir ou tiver outro nome, o script avisa no console e reaproveita o último offset salvo em vez de quebrar. |
-| `window.TribalWars` (API nativa `.get`/`.post`) | Ainda não usado na Fase 0 — reservado para Fase 1/2 | UNVERIFIED | Vem da pesquisa em `thevtm/Tribal-Wars-Farm-Assistant-Plus`; precisa confirmar antes de usar em módulo de automação real. |
+| `#menu_row2` / `#menu_row` | Entrada de menu nativa (`ui.injectMenuEntry`) | **VERIFIED** (2026-09-19, Opera GX) | Um dos dois existe — o link "TW Suite" foi injetado com sucesso na barra ao lado do nome da aldeia, sem quebrar o layout. Não sabemos ainda qual dos dois matched exatamente (não crítico, os dois convivem bem). |
+| `window.game_data` | Leitura de aldeia/mundo/tela (`gameApi.getGameData`) | **Corrigido** (2026-09-19) | Painel mostrou "game_data: NÃO encontrado" no primeiro teste. Causa identificada: sandbox do Tampermonkey — `window.game_data` do script não é o `game_data` da página. Corrigido lendo via `unsafeWindow.game_data` (v0.1.1). Precisa reconfirmar no próximo teste. |
+| `game_data.time_generated` | Cálculo do offset de servidor (`serverTime.computeOffsetFromGameData`) | UNVERIFIED | Dependia do fix acima (`game_data` não era lido de jeito nenhum). Reconfirmar offset != 0 no próximo teste. |
+| `window.TribalWars` (API nativa `.get`/`.post`) | Ainda não usado na Fase 0 — reservado para Fase 1/2 | UNVERIFIED | Vem da pesquisa em `thevtm/Tribal-Wars-Farm-Assistant-Plus`; provavelmente também precisa de `unsafeWindow.TribalWars` pelo mesmo motivo do sandbox. Confirmar antes de usar em módulo de automação real. |
 
 ## Fases futuras (ainda não implementadas)
 
