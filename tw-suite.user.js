@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.2.1
+// @version      0.2.2
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -552,21 +552,56 @@
     return candidates.slice(0, 15);
   }
 
-  function fillAndSubmitAttack(unit, amount, x, y) {
+  // Preencher x/y não seleciona o alvo na hora — o jogo resolve a
+  // coordenada pra um alvo de verdade de forma assíncrona (a URL ganha
+  // ?target=<id> quando termina). Clicar em "Ataque" antes disso é
+  // rejeitado pelo próprio jogo (confirmado ao vivo em 2026-09-19).
+  function waitForTargetResolved(timeoutMs = 4000, intervalMs = 150) {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const tick = () => {
+        const params = new URLSearchParams(location.search);
+        if (params.get('target')) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - start >= timeoutMs) {
+          resolve(false);
+          return;
+        }
+        setTimeout(tick, intervalMs);
+      };
+      tick();
+    });
+  }
+
+  async function fillAndSubmitAttack(unit, amount, x, y) {
     const xInput = document.querySelector('#inputx');
     const yInput = document.querySelector('#inputy');
-    const unitInput = document.querySelector('#unit_input_' + unit);
     const attackBtn = document.querySelector('#target_attack');
-    if (!xInput || !yInput || !unitInput || !attackBtn) {
+    if (!xInput || !yInput || !attackBtn) {
       return { ok: false, reason: 'campo do formulário não encontrado (seletor pode ter mudado)' };
     }
     xInput.value = String(x);
     yInput.value = String(y);
-    unitInput.value = String(amount);
-    for (const el of [xInput, yInput, unitInput]) {
+    for (const el of [xInput, yInput]) {
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
     }
+
+    const resolved = await waitForTargetResolved();
+    if (!resolved) {
+      return { ok: false, reason: 'o jogo não confirmou o alvo a tempo (sem ?target= na URL) — tente de novo' };
+    }
+
+    const unitInput = document.querySelector('#unit_input_' + unit);
+    if (!unitInput) {
+      return { ok: false, reason: `campo de tropa "${unit}" não encontrado` };
+    }
+    unitInput.value = String(amount);
+    unitInput.dispatchEvent(new Event('input', { bubbles: true }));
+    unitInput.dispatchEvent(new Event('change', { bubbles: true }));
+
     attackBtn.click();
     return { ok: true };
   }
@@ -766,7 +801,11 @@
             log.warn(`Só ${available} "${settings.unit}" disponíveis — enviando ${amount} em vez de ${settings.amount}.`);
           }
 
-          const result = fillAndSubmitAttack(settings.unit, amount, target.x, target.y);
+          btn.disabled = true;
+          btn.textContent = 'Aguardando alvo...';
+          const result = await fillAndSubmitAttack(settings.unit, amount, target.x, target.y);
+          btn.disabled = false;
+          btn.textContent = settings.dryRun ? 'Simular' : 'Enviar';
           if (!result.ok) {
             log.error('Falha ao preencher/enviar:', result.reason);
             return;
