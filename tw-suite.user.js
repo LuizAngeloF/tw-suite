@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.2.1
+// @version      1.2.2
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -325,12 +325,42 @@
     // Roda só na página do dashboard (file://). O dashboard e o script
     // conversam por postMessage porque o sandbox do Tampermonkey não
     // compartilha funções com a página de forma confiável entre navegadores.
+    //
+    // Como uma página file:// não mostra painel nenhum do TW Suite (bootstrap()
+    // nunca roda ali), não dava pra saber se o script sequer chegou a ser
+    // injetado. Esse selo visual resolve isso: se ele NUNCA aparecer, o
+    // problema é permissão do navegador (Tampermonkey não rodou o script
+    // nesta página) — não tem nada que o script possa fazer sobre isso. Se
+    // aparecer mas ficar em "aguardando dashboard...", o script rodou mas
+    // não recebeu nenhuma mensagem da página — aí é bug de sincronização.
+    function injectFileBadge() {
+      const version = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '?';
+      const el = document.createElement('div');
+      Object.assign(el.style, {
+        position: 'fixed', bottom: '10px', left: '10px', zIndex: 2147483647,
+        background: '#1b1208', color: '#e9a54b', border: '1px solid #7a5230',
+        borderRadius: '6px', padding: '5px 10px', fontSize: '11px',
+        fontFamily: 'Consolas, monospace', boxShadow: '0 2px 8px rgba(0,0,0,.5)',
+      });
+      el.textContent = `● TW Suite v${version} — aguardando dashboard...`;
+      document.body.appendChild(el);
+      return {
+        markContacted() {
+          el.textContent = `● TW Suite v${version} — conectado ao dashboard`;
+          el.style.color = '#6cc4a6';
+          el.style.borderColor = '#3e9b7c';
+        },
+      };
+    }
+
     function startDashboardBridge() {
+      const badge = injectFileBadge();
       const reply = (id, ok, payload) =>
         window.postMessage({ twsuite: 'bridge-res', id, ok, payload }, '*');
 
       window.addEventListener('message', async (ev) => {
         if (ev.source !== window || !ev.data || ev.data.twsuite !== 'bridge-req') return;
+        badge.markContacted();
         const { id, op, payload } = ev.data;
         try {
           if (op === 'hello') {
