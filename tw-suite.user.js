@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.3.3
+// @version      0.3.4
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -656,6 +656,25 @@
     el.dispatchEvent(new MouseEvent('click', opts));
   }
 
+  // Última tentativa: em vez de simular um clique (sempre isTrusted:
+  // false), envia o <form> diretamente pela API do navegador.
+  // form.requestSubmit(el) ainda dispara o evento "submit" nativo (então
+  // um handler JS da página que intercepta esse evento continua rodando
+  // normalmente) mas pula o tratamento de clique do botão em si — se o
+  // bloqueio for especificamente no listener de click do botão, isso
+  // pode contornar. form.submit() (mais antigo) nem dispara "submit",
+  // então fica como último recurso.
+  function submitViaForm(el) {
+    const form = el.form || el.closest('form');
+    if (!form) return false;
+    if (typeof form.requestSubmit === 'function') {
+      form.requestSubmit(el);
+      return true;
+    }
+    form.submit();
+    return true;
+  }
+
   // A tela de confirmação também aparece via transição client-side (sem
   // recarregar a página), então o botão não existe ainda no instante em
   // que clicamos "Ataque" — precisa esperar aparecer, do mesmo jeito que
@@ -916,17 +935,21 @@
             // Reconsulta na hora do clique — o nó pego pela espera pode
             // ter sido substituído por um novo (SPA re-renderizando).
             const clickTarget = document.querySelector('#troop_confirm_submit') || confirmBtn;
-            log.info(`Auto-confirmar: clicando em "Enviar ataque" -> ${target.x}|${target.y}.`);
-            realisticClick(clickTarget);
+            log.info(`Auto-confirmar: enviando o formulário -> ${target.x}|${target.y}.`);
+            const submitted = submitViaForm(clickTarget);
+            if (!submitted) {
+              log.warn('Não achei o <form> do botão de confirmação — tentando clique simulado como último recurso.');
+              realisticClick(clickTarget);
+            }
 
             // Diagnóstico: se o botão ainda estiver lá e visível depois
-            // do clique, o clique provavelmente não teve efeito (alguns
-            // jogos rejeitam cliques sintéticos na ação final, como
+            // do envio, provavelmente não teve efeito (alguns jogos
+            // bloqueiam interação automática na ação final, como
             // proteção anti-bot) — melhor avisar do que assumir sucesso.
             await new Promise((r) => setTimeout(r, 800));
             const stillThere = document.querySelector('#troop_confirm_submit');
             if (stillThere && isVisible(stillThere)) {
-              log.warn('O botão "Enviar ataque" ainda está na tela depois do clique — o auto-confirmar provavelmente NÃO funcionou (o jogo pode estar bloqueando cliques automáticos nessa etapa). Confirme manualmente. Alvo continua na lista.');
+              log.warn('O botão "Enviar ataque" ainda está na tela depois da tentativa — o auto-confirmar provavelmente NÃO funcionou (o jogo pode estar bloqueando envio automático nessa etapa). Confirme manualmente. Alvo continua na lista.');
               return;
             }
 
