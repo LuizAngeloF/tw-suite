@@ -1582,16 +1582,25 @@ function asideHTML() {
   const inTest = keys.filter((k) => activeCount(state.profiles[k]) > 0 && testState(state.profiles[k]) !== 'false').length;
   const seen24 = keys.filter((k) => state.accounts[k] && Date.now() - state.accounts[k].lastSeen < 86400000).length;
 
+  const isFileProtocol = location.protocol === 'file:';
   const sync = bridge.connected
     ? `
       <div class="sync-hero"><span class="sync-orb on">${icon('link')}</span><div><b>Tampermonkey conectado</b><span>Script v${esc(bridge.version)} · tudo salvo direto nele</span></div></div>
       <p class="note" style="margin-top:12px">Cada conta recebe a configuração na próxima vez que você abrir o jogo com ela.</p>`
-    : `
+    : isFileProtocol ? `
+      <div class="sync-hero"><span class="sync-orb">${icon('link')}</span><div><b>Só neste navegador</b><span>Aberto como arquivo local (file://)</span></div></div>
+      <p class="note" style="margin:10px 0">Arquivo local exige permissões extras do navegador pro Tampermonkey rodar aqui. É mais simples rodar num servidor local — evita essa permissão inteira:</p>
+      <ol class="steps">
+        <li><span>Dê 2 cliques em <code>start-dashboard.bat</code>, na pasta do projeto.</span></li>
+        <li><span>Uma aba abre em <code>http://localhost:8787/dashboard.html</code> — use essa aba a partir de agora (não esta).</span></li>
+      </ol>
+      <p class="note" style="margin:10px 0">Prefere continuar com o arquivo local? Ative <code>Permitir acesso a URLs de arquivo</code> nos detalhes do Tampermonkey em <code>chrome://extensions</code> e recarregue. Enquanto isso não conectar, dá pra sincronizar na mão:</p>
+      <button class="btn btn-ghost btn-sm" data-act="sync-code" type="button" style="width:100%">${icon('key', 'sm')}Usar código de sincronização</button>` : `
       <div class="sync-hero"><span class="sync-orb">${icon('link')}</span><div><b>Só neste navegador</b><span>O script ainda não está lendo este painel</span></div></div>
       <ol class="steps">
-        <li><span>Atualize o TW Suite no Tampermonkey para a versão <code>1.2.1</code> ou mais nova.</span></li>
-        <li><span>Abra <code>chrome://extensions</code>, clique em <b>Detalhes</b> no Tampermonkey e ative <code>Permitir acesso a URLs de arquivo</code>. (Esse botão fica na página da extensão, não dentro do script.)</span></li>
-        <li><span>Recarregue esta página. O ícone do Tampermonkey deve mostrar um número — se continuar em 0, o passo anterior não pegou.</span></li>
+        <li><span>Atualize o TW Suite no Tampermonkey para a versão <code>1.3.0</code> ou mais nova — essa versão adicionou suporte a <code>localhost</code>.</span></li>
+        <li><span>Recarregue esta aba. Deve aparecer um selo no canto inferior esquerdo (<code>TW Suite v… — aguardando dashboard…</code>) confirmando que o script rodou aqui.</span></li>
+        <li><span>Se o selo não aparecer, confira se o Tampermonkey está ativo (ícone colorido, não cinza) e se o script está habilitado no painel dele.</span></li>
       </ol>
       <p class="note" style="margin:10px 0">Enquanto isso não estiver ativo, use o código abaixo pra sincronizar manualmente — funciona sempre, sem depender de permissão nenhuma.</p>
       <button class="btn btn-ghost btn-sm" data-act="sync-code" type="button" style="width:100%">${icon('key', 'sm')}Usar código de sincronização</button>`;

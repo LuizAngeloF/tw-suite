@@ -4,12 +4,14 @@ Painel para cadastrar suas contas e escolher o que cada uma automatiza. O script
 
 ## Instalação
 
-1. Atualize o **TW Suite no Tampermonkey para a v1.2.1** ou mais nova.
-2. Baixe o `dashboard.html` para o seu computador (qualquer pasta).
-3. No Chrome, abra `chrome://extensions`, clique em **Detalhes** no Tampermonkey e ative **Permitir acesso a URLs de arquivo**.
-4. Abra o `dashboard.html` no navegador. O selo no topo deve mostrar **Sincronizado**.
+1. Atualize o **TW Suite no Tampermonkey para a v1.3.0** ou mais nova.
+2. Baixe a pasta do projeto (ou pelo menos `dashboard.html` + `start-dashboard.bat`, os dois juntos na mesma pasta).
+3. Dê **2 cliques em `start-dashboard.bat`**. Abre uma aba em `http://localhost:8787/dashboard.html` — use essa aba, não um arquivo aberto direto.
+4. O selo no topo deve mostrar **Sincronizado**. Deixe a janela preta do `.bat` aberta enquanto usar o dashboard — fechar ela desliga o servidor.
 
-Sem o passo 3 o painel funciona, mas grava só no navegador. Nesse caso use o **código de sincronização**: gere no painel e, no jogo, abra `TW Suite → Importar código do dashboard`.
+**Por que `start-dashboard.bat` em vez de abrir o `dashboard.html` direto?** Um arquivo aberto como `file://` exige que você ative manualmente "Permitir acesso a URLs de arquivo" (e, em navegadores baseados em Chromium mais novos, também "Permitir scripts de usuário") nos detalhes da extensão Tampermonkey — fácil de esquecer um dos dois, e o navegador não avisa quando falta. Servido em `localhost`, o Tampermonkey trata como qualquer outra página e não precisa de nenhuma dessas permissões.
+
+Prefere continuar abrindo o arquivo direto? Ainda funciona — ative as duas permissões acima em `chrome://extensions → Tampermonkey → Detalhes`. Sem elas, o painel funciona mas grava só neste navegador; nesse caso use o **código de sincronização**: gere no painel e, no jogo, abra `TW Suite → Importar código do dashboard`.
 
 ## Como funciona
 
@@ -45,11 +47,15 @@ Depois que o script roda pelo menos uma vez numa conta (até ~90s após abrir o 
 
 ## Se não sincronizar
 
-1. No jogo, abra o painel **TW Suite** (link no menu ou botão flutuante). Ele agora mostra um bloco **"Sincronização com o dashboard"** com `game_data.world`, o nick e a **chave calculada** (ex.: `br144:promiss`).
-2. No dashboard, confira se a conta está cadastrada com **exatamente** esse mesmo mundo e nick — a chave precisa bater dos dois lados.
-3. Se o dashboard mostrar **"Só neste navegador"** e não **"Sincronizado"**, o script não está sendo injetado na página do dashboard. Confira em `chrome://extensions → Tampermonkey → Detalhes → Permitir acesso a URLs de arquivo`, e recarregue o dashboard depois de ativar.
-4. Enquanto isso não funcionar, use **"Usar código de sincronização"** no dashboard — copia um código, cole em `TW Suite → Importar código do dashboard` no jogo. Funciona sempre, independente da permissão acima.
-5. Depois de importar, abra o painel **TW Suite** de novo — "Último perfil aplicado" deve mostrar ✅ com a chave da conta. Se mostrar "sem perfil salvo", ele lista as chaves que reconhece — compare com a chave calculada do passo 1.
+1. **Primeiro, use `start-dashboard.bat`** em vez do arquivo direto — resolve a maioria dos casos, porque tira a permissão de arquivo local da equação inteira.
+2. Com o dashboard aberto em `http://localhost:8787/dashboard.html`, olhe o canto inferior esquerdo da aba. Deve aparecer um selo:
+   - **Nenhum selo** → o Tampermonkey não rodou o script nessa aba. Confirme que o TW Suite está atualizado (v1.3.0+) e habilitado no painel do Tampermonkey.
+   - **"aguardando dashboard..."** → o script rodou mas não trocou mensagem com a página. Recarregue a aba uma vez; se persistir, é bug — me avise.
+   - **"conectado ao dashboard"** (fica verde) → a ponte funcionou; se o selo do topo ainda disser "Só neste navegador", recarregue a página uma vez.
+3. No jogo, abra o painel **TW Suite** (link no menu ou botão flutuante). Ele mostra um bloco **"Sincronização com o dashboard"** com `game_data.world`, o nick e a **chave calculada** (ex.: `br144:promiss`).
+4. No dashboard, confira se a conta está cadastrada com **exatamente** esse mesmo mundo e nick — a chave precisa bater dos dois lados.
+5. Ainda sem sincronizar? Use **"Usar código de sincronização"** no dashboard — copia um código, cole em `TW Suite → Importar código do dashboard` no jogo. Não depende de nenhuma permissão, mas é manual: repita sempre que mudar algo no dashboard.
+6. Depois de importar, abra o painel **TW Suite** de novo — "Último perfil aplicado" deve mostrar ✅ com a chave da conta. Se mostrar "sem perfil salvo", ele lista as chaves que reconhece — compare com a chave calculada do passo 3.
 
 ## Limitações conhecidas
 

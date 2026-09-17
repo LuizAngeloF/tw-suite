@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.2.2
+// @version      1.3.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
+// @match        http://localhost/*dashboard.html*
+// @match        http://127.0.0.1/*dashboard.html*
 // @match        file:///*dashboard.html
 // @match        file://*/dashboard.html
 // @include      file:///*dashboard.html*
@@ -322,7 +324,7 @@
       return Object.keys(data.profiles).length;
     }
 
-    // Roda só na página do dashboard (file://). O dashboard e o script
+    // Roda só na página do dashboard (file:// ou http://localhost). O dashboard e o script
     // conversam por postMessage porque o sandbox do Tampermonkey não
     // compartilha funções com a página de forma confiável entre navegadores.
     //
@@ -668,7 +670,11 @@
     await moduleLoader.runAll();
   }
 
-  if (location.protocol === 'file:') {
+  // Detecta a página do dashboard pelo caminho, não pelo protocolo — assim
+  // funciona tanto aberto direto (file://) quanto servido em localhost
+  // (http://localhost:PORTA/dashboard.html), que evita de vez os problemas
+  // de permissão do navegador com file:// (ver start-dashboard.bat).
+  if (/dashboard\.html$/.test(location.pathname)) {
     profiles.startDashboardBridge();
     window.TWSuite.dashboardOnly = true;
   } else if (document.readyState === 'loading') {
