@@ -45,7 +45,6 @@ Clique no botão/aba "TW Suite" pra abrir o painel. Nele aparecem:
 
 - Antes de publicar uma nova versão: atualize o `@version` no cabeçalho do userscript (o Tampermonkey só baixa de novo se o número mudar).
 - Seletores/variáveis do jogo usados no código (ex.: `#menu_row`, `game_data.time_generated`) ainda não foram 100% confirmados contra uma conta real — ver [`docs/verification-log.md`](docs/verification-log.md) pro que já foi validado e o que ainda é suposição.
-- Depois de criar o repositório no GitHub, troque `SEU_USUARIO` no cabeçalho do `tw-suite.user.js` (linhas `@namespace`, `@author`, `@updateURL`, `@downloadURL`) pelo usuário/organização real — senão o auto-update não funciona.
 
 ## Segurança
 

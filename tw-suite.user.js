@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         TW Suite
-// @namespace    https://github.com/SEU_USUARIO/tw-suite
+// @namespace    https://github.com/LuizAngeloF/tw-suite
 // @version      0.1.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
-// @author       SEU_USUARIO
+// @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
 // @icon         https://www.tribalwars.com.br/favicon.ico
 // @grant        GM_setValue
@@ -11,8 +11,8 @@
 // @grant        GM.setValue
 // @grant        GM.getValue
 // @run-at       document-end
-// @updateURL    https://raw.githubusercontent.com/SEU_USUARIO/tw-suite/main/tw-suite.user.js
-// @downloadURL  https://raw.githubusercontent.com/SEU_USUARIO/tw-suite/main/tw-suite.user.js
+// @updateURL    https://raw.githubusercontent.com/LuizAngeloF/tw-suite/main/tw-suite.user.js
+// @downloadURL  https://raw.githubusercontent.com/LuizAngeloF/tw-suite/main/tw-suite.user.js
 // ==/UserScript==
 
 /*
@@ -24,9 +24,6 @@
  * por causa disso — ver docs/verification-log.md para o processo de
  * confirmação ao vivo.
  *
- * Antes de instalar: troque "SEU_USUARIO" acima pelo usuário/repo real do
- * GitHub onde este arquivo vai ficar hospedado, senão o auto-update não
- * funciona.
  */
 
 (function () {
