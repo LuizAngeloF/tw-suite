@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.1.2
+// @version      0.2.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -447,4 +447,332 @@
   } else {
     bootstrap();
   }
+})();
+
+// ============================================================
+// MÓDULO: auto-farm (Fase 1)
+//
+// Farm sem depender do Assistente de Saque (que é premium neste
+// mundo — confirmado ao vivo em 2026-09-19, ver verification-log).
+// Em vez disso: lê /map/village.txt (arquivo público do próprio
+// jogo, confirmado acessível sem login) pra achar aldeias bárbaras
+// perto da aldeia atual, mostra a lista num painel na Praça de
+// Reunião, e ao clicar "Enviar" preenche o formulário REAL de envio
+// (#inputx/#inputy/#unit_input_<tropa>) e clica no botão real
+// #target_attack — nunca recria a requisição na mão.
+//
+// Seletores confirmados ao vivo em 2026-09-19 (ver
+// docs/verification-log.md): #inputx, #inputy, #unit_input_<tropa>
+// (com data-all-count = disponível), #target_attack.
+//
+// O clique automático no botão de CONFIRMAR (tela try=confirm)
+// ainda não foi verificado ao vivo — por isso autoConfirm começa
+// desligado por padrão; liga manualmente só depois de confirmar
+// que o seletor certo é usado.
+// ============================================================
+(function registerAutoFarmModule() {
+  'use strict';
+
+  const MODULE_ID = 'auto-farm';
+  const PANEL_ID = 'twsuite-autofarm-panel';
+  const VILLAGE_CACHE_KEY = 'auto-farm:villageIndexCache';
+  const VILLAGE_CACHE_TTL_MS = 3 * 60 * 60 * 1000; // village.txt tem ~3MB; evita rebaixar toda hora
+
+  const UNIT_OPTIONS = [
+    { value: 'light', label: 'Cavalaria leve' },
+    { value: 'spear', label: 'Lanceiro' },
+    { value: 'sword', label: 'Espadachim' },
+    { value: 'archer', label: 'Arqueiro' },
+  ];
+
+  const DEFAULT_SETTINGS = {
+    unit: 'light',
+    amount: 5,
+    maxDistance: 12,
+    cooldownMinutes: 30,
+    dryRun: true,
+    autoConfirm: false, // UNVERIFIED — ver comentário acima
+  };
+
+  function dist(ax, ay, bx, by) {
+    return Math.hypot(ax - bx, ay - by);
+  }
+
+  function parseVillageIndex(text) {
+    const villages = [];
+    const lines = text.split('\n');
+    for (const line of lines) {
+      if (!line) continue;
+      const parts = line.split(',');
+      if (parts.length < 5) continue;
+      const x = Number(parts[2]);
+      const y = Number(parts[3]);
+      if (Number.isNaN(x) || Number.isNaN(y)) continue;
+      villages.push({ id: parts[0], x, y, owner: parts[4] });
+    }
+    return villages;
+  }
+
+  async function getVillageIndex(storage, log) {
+    const cached = await storage.get(VILLAGE_CACHE_KEY, null);
+    const now = Date.now();
+    if (cached && cached.fetchedAt && now - cached.fetchedAt < VILLAGE_CACHE_TTL_MS && cached.text) {
+      return parseVillageIndex(cached.text);
+    }
+    try {
+      const res = await fetch('/map/village.txt', { credentials: 'omit' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      await storage.set(VILLAGE_CACHE_KEY, { fetchedAt: now, text });
+      return parseVillageIndex(text);
+    } catch (e) {
+      log.error('Falha ao buscar /map/village.txt:', e);
+      return cached && cached.text ? parseVillageIndex(cached.text) : [];
+    }
+  }
+
+  function cooldownKey(sourceId, targetId) {
+    return `auto-farm:lastSent:${sourceId}:${targetId}`;
+  }
+
+  async function findTargets(ctx, myVillage, settings) {
+    const villages = await getVillageIndex(ctx.storage, ctx.log);
+    const now = Date.now();
+    const candidates = [];
+    for (const v of villages) {
+      if (v.owner !== '0') continue;
+      if (v.id === String(myVillage.id)) continue;
+      const d = dist(myVillage.x, myVillage.y, v.x, v.y);
+      if (d > settings.maxDistance) continue;
+      const lastSent = await ctx.storage.get(cooldownKey(myVillage.id, v.id), 0);
+      if (now - lastSent < settings.cooldownMinutes * 60 * 1000) continue;
+      candidates.push({ ...v, distance: d });
+    }
+    candidates.sort((a, b) => a.distance - b.distance);
+    return candidates.slice(0, 15);
+  }
+
+  function fillAndSubmitAttack(unit, amount, x, y) {
+    const xInput = document.querySelector('#inputx');
+    const yInput = document.querySelector('#inputy');
+    const unitInput = document.querySelector('#unit_input_' + unit);
+    const attackBtn = document.querySelector('#target_attack');
+    if (!xInput || !yInput || !unitInput || !attackBtn) {
+      return { ok: false, reason: 'campo do formulário não encontrado (seletor pode ter mudado)' };
+    }
+    xInput.value = String(x);
+    yInput.value = String(y);
+    unitInput.value = String(amount);
+    for (const el of [xInput, yInput, unitInput]) {
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    attackBtn.click();
+    return { ok: true };
+  }
+
+  function tryAutoConfirm(log) {
+    const candidateSelectors = [
+      '#troop_confirm_go',
+      '#troop_confirm_submit',
+      'input[type=submit][value*="onfirm" i]',
+      'input[type=submit][value*="Confirmar" i]',
+      '.btn-confirm-yes',
+    ];
+    for (const sel of candidateSelectors) {
+      const btn = document.querySelector(sel);
+      if (btn) {
+        log.warn(`Auto-confirmar (seletor NÃO verificado ao vivo): clicando em "${sel}". Acompanhe pra garantir que é o botão certo.`);
+        btn.click();
+        return true;
+      }
+    }
+    log.warn('Auto-confirmar ligado, mas não achei um botão de confirmação reconhecido — confirme manualmente desta vez e avise pra eu ajustar o seletor.');
+    return false;
+  }
+
+  function buildPanel() {
+    const el = document.createElement('div');
+    el.id = PANEL_ID;
+    Object.assign(el.style, {
+      position: 'fixed',
+      top: '60px',
+      left: '16px',
+      width: '300px',
+      maxHeight: '75vh',
+      overflowY: 'auto',
+      background: '#f4e4bc',
+      border: '2px solid #7a5230',
+      borderRadius: '6px',
+      padding: '10px',
+      zIndex: 99998,
+      fontSize: '12px',
+      color: '#1a1a1a',
+      fontFamily: 'Verdana, Arial, sans-serif',
+      boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+    });
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function renderSettingsForm(container, settings, onChange) {
+    const wrap = document.createElement('div');
+    wrap.style.marginBottom = '8px';
+    wrap.style.borderBottom = '1px solid #7a5230';
+    wrap.style.paddingBottom = '8px';
+
+    const unitSelect = document.createElement('select');
+    for (const opt of UNIT_OPTIONS) {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      if (opt.value === settings.unit) o.selected = true;
+      unitSelect.appendChild(o);
+    }
+    unitSelect.addEventListener('change', () => onChange({ unit: unitSelect.value }));
+
+    const amountInput = document.createElement('input');
+    amountInput.type = 'number';
+    amountInput.min = '1';
+    amountInput.value = String(settings.amount);
+    amountInput.style.width = '50px';
+    amountInput.title = 'Quantidade a enviar por alvo';
+    amountInput.addEventListener('change', () =>
+      onChange({ amount: Math.max(1, Number(amountInput.value) || 1) })
+    );
+
+    const distInput = document.createElement('input');
+    distInput.type = 'number';
+    distInput.min = '1';
+    distInput.value = String(settings.maxDistance);
+    distInput.style.width = '50px';
+    distInput.title = 'Distância máxima (campos)';
+    distInput.addEventListener('change', () =>
+      onChange({ maxDistance: Math.max(1, Number(distInput.value) || 1) })
+    );
+
+    const dryRunLabel = document.createElement('label');
+    dryRunLabel.style.display = 'block';
+    dryRunLabel.style.marginTop = '4px';
+    const dryRunCb = document.createElement('input');
+    dryRunCb.type = 'checkbox';
+    dryRunCb.checked = settings.dryRun;
+    dryRunCb.addEventListener('change', () => onChange({ dryRun: dryRunCb.checked }));
+    dryRunLabel.appendChild(dryRunCb);
+    dryRunLabel.appendChild(document.createTextNode(' Modo teste (não envia de verdade)'));
+
+    wrap.appendChild(document.createTextNode('Tropa: '));
+    wrap.appendChild(unitSelect);
+    wrap.appendChild(document.createElement('br'));
+    wrap.appendChild(document.createTextNode('Qtd: '));
+    wrap.appendChild(amountInput);
+    wrap.appendChild(document.createTextNode('  Alcance: '));
+    wrap.appendChild(distInput);
+    wrap.appendChild(dryRunLabel);
+
+    container.appendChild(wrap);
+  }
+
+  window.TWSuite.registerModule({
+    id: MODULE_ID,
+    name: 'Auto Farm (sem premium)',
+    screens: ['place'],
+    defaultEnabled: false,
+
+    async run(ctx) {
+      const { storage, gameApi, log } = ctx;
+      const gd = gameApi.getGameData();
+      if (!gd || !gd.village) {
+        log.warn('game_data.village ausente — não consigo determinar a aldeia atual.');
+        return;
+      }
+
+      const params = new URLSearchParams(location.search);
+      const isConfirmStep = params.get('try') === 'confirm';
+      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+
+      let panel = document.getElementById(PANEL_ID);
+      if (!panel) panel = buildPanel();
+      panel.innerHTML = '';
+
+      const title = document.createElement('div');
+      title.style.fontWeight = 'bold';
+      title.style.marginBottom = '6px';
+      title.textContent = 'Auto Farm';
+      panel.appendChild(title);
+
+      if (isConfirmStep) {
+        const info = document.createElement('div');
+        info.textContent = settings.autoConfirm
+          ? 'Tentando confirmar automaticamente (seletor não verificado)...'
+          : 'Na tela de confirmação. Confirme manualmente — auto-confirmar está desligado.';
+        panel.appendChild(info);
+        if (settings.autoConfirm) tryAutoConfirm(log);
+        return;
+      }
+
+      renderSettingsForm(panel, settings, async (patch) => {
+        settings = { ...settings, ...patch };
+        await storage.setModuleSettings(MODULE_ID, settings);
+        log.info('Configurações do Auto Farm atualizadas:', settings);
+      });
+
+      const listEl = document.createElement('div');
+      listEl.textContent = 'Buscando aldeias bárbaras próximas...';
+      panel.appendChild(listEl);
+
+      const myVillage = { id: gd.village.id, x: gd.village.x, y: gd.village.y };
+      const targets = await findTargets(ctx, myVillage, settings);
+
+      listEl.innerHTML = '';
+      if (targets.length === 0) {
+        listEl.textContent = 'Nenhum alvo bárbaro disponível no alcance / fora do cooldown.';
+        return;
+      }
+
+      for (const target of targets) {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        row.style.alignItems = 'center';
+        row.style.margin = '3px 0';
+
+        const label = document.createElement('span');
+        label.textContent = `${target.x}|${target.y} (${target.distance.toFixed(1)})`;
+        row.appendChild(label);
+
+        const btn = document.createElement('button');
+        btn.textContent = settings.dryRun ? 'Simular' : 'Enviar';
+        btn.style.fontSize = '11px';
+        btn.addEventListener('click', async () => {
+          const unitInput = document.querySelector('#unit_input_' + settings.unit);
+          const available = unitInput ? Number(unitInput.dataset.allCount || 0) : 0;
+          const amount = Math.min(settings.amount, available);
+
+          if (available <= 0) {
+            log.warn(`Sem "${settings.unit}" disponível nesta aldeia (0 unidades) — não enviado.`);
+            return;
+          }
+          if (amount < settings.amount) {
+            log.warn(`Só ${available} "${settings.unit}" disponíveis — enviando ${amount} em vez de ${settings.amount}.`);
+          }
+
+          if (settings.dryRun) {
+            log.info(`(modo teste) enviaria ${amount} "${settings.unit}" para ${target.x}|${target.y}`);
+            return;
+          }
+
+          const result = fillAndSubmitAttack(settings.unit, amount, target.x, target.y);
+          if (!result.ok) {
+            log.error('Falha ao preencher/enviar:', result.reason);
+            return;
+          }
+          await ctx.storage.set(cooldownKey(myVillage.id, target.id), Date.now());
+          log.info(`Enviado: ${amount} "${settings.unit}" -> ${target.x}|${target.y}`);
+        });
+        row.appendChild(btn);
+        listEl.appendChild(row);
+      }
+    },
+  });
 })();
