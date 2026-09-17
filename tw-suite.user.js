@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.2.2
+// @version      0.3.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -463,12 +463,16 @@
 //
 // Seletores confirmados ao vivo em 2026-09-19 (ver
 // docs/verification-log.md): #inputx, #inputy, #unit_input_<tropa>
-// (com data-all-count = disponível), #target_attack.
+// (com data-all-count = disponível), #target_attack,
+// #troop_confirm_submit (botão final "Enviar ataque"). Preencher
+// x/y não seleciona o alvo na hora — o jogo resolve a coordenada de
+// forma assíncrona (a URL ganha ?target=<id> quando termina), por
+// isso o código espera esse parâmetro aparecer antes de clicar.
 //
-// O clique automático no botão de CONFIRMAR (tela try=confirm)
-// ainda não foi verificado ao vivo — por isso autoConfirm começa
-// desligado por padrão; liga manualmente só depois de confirmar
-// que o seletor certo é usado.
+// autoConfirm começa DESLIGADO por padrão mesmo com o seletor já
+// verificado — é uma ação real e definitiva (as tropas saem de
+// verdade), então fica opt-in por segurança, não por incerteza
+// técnica.
 // ============================================================
 (function registerAutoFarmModule() {
   'use strict';
@@ -491,7 +495,7 @@
     maxDistance: 12,
     cooldownMinutes: 30,
     dryRun: true,
-    autoConfirm: false, // UNVERIFIED — ver comentário acima
+    autoConfirm: false, // seletor verificado, mas opt-in por ser uma ação definitiva
   };
 
   function dist(ax, ay, bx, by) {
@@ -606,24 +610,40 @@
     return { ok: true };
   }
 
-  function tryAutoConfirm(log) {
-    const candidateSelectors = [
-      '#troop_confirm_go',
-      '#troop_confirm_submit',
-      'input[type=submit][value*="onfirm" i]',
-      'input[type=submit][value*="Confirmar" i]',
-      '.btn-confirm-yes',
-    ];
-    for (const sel of candidateSelectors) {
+  // A tela de confirmação também aparece via transição client-side (sem
+  // recarregar a página), então o botão não existe ainda no instante em
+  // que clicamos "Ataque" — precisa esperar aparecer, do mesmo jeito que
+  // esperamos o alvo ser resolvido.
+  function waitForElement(selector, timeoutMs = 5000, intervalMs = 150) {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const tick = () => {
+        const el = document.querySelector(selector);
+        if (el) {
+          resolve(el);
+          return;
+        }
+        if (Date.now() - start >= timeoutMs) {
+          resolve(null);
+          return;
+        }
+        setTimeout(tick, intervalMs);
+      };
+      tick();
+    });
+  }
+
+  // #troop_confirm_submit confirmado ao vivo em 2026-09-19 (botão
+  // "Enviar ataque"). Fallbacks abaixo continuam UNVERIFIED, só como
+  // rede de segurança caso o jogo mude o id.
+  const CONFIRM_BUTTON_SELECTORS = ['#troop_confirm_submit', '.troop_confirm_go', 'input[type=submit][value*="Enviar" i]'];
+
+  async function waitForConfirmButton(timeoutMs = 5000) {
+    for (const sel of CONFIRM_BUTTON_SELECTORS) {
       const btn = document.querySelector(sel);
-      if (btn) {
-        log.warn(`Auto-confirmar (seletor NÃO verificado ao vivo): clicando em "${sel}". Acompanhe pra garantir que é o botão certo.`);
-        btn.click();
-        return true;
-      }
+      if (btn) return btn;
     }
-    log.warn('Auto-confirmar ligado, mas não achei um botão de confirmação reconhecido — confirme manualmente desta vez e avise pra eu ajustar o seletor.');
-    return false;
+    return waitForElement(CONFIRM_BUTTON_SELECTORS[0], timeoutMs);
   }
 
   function buildPanel() {
@@ -696,6 +716,16 @@
     dryRunLabel.appendChild(dryRunCb);
     dryRunLabel.appendChild(document.createTextNode(' Modo teste (não envia de verdade)'));
 
+    const autoConfirmLabel = document.createElement('label');
+    autoConfirmLabel.style.display = 'block';
+    autoConfirmLabel.style.marginTop = '2px';
+    const autoConfirmCb = document.createElement('input');
+    autoConfirmCb.type = 'checkbox';
+    autoConfirmCb.checked = settings.autoConfirm;
+    autoConfirmCb.addEventListener('change', () => onChange({ autoConfirm: autoConfirmCb.checked }));
+    autoConfirmLabel.appendChild(autoConfirmCb);
+    autoConfirmLabel.appendChild(document.createTextNode(' Auto-confirmar envio (ação definitiva!)'));
+
     wrap.appendChild(document.createTextNode('Tropa: '));
     wrap.appendChild(unitSelect);
     wrap.appendChild(document.createElement('br'));
@@ -704,6 +734,7 @@
     wrap.appendChild(document.createTextNode('  Alcance: '));
     wrap.appendChild(distInput);
     wrap.appendChild(dryRunLabel);
+    wrap.appendChild(autoConfirmLabel);
 
     container.appendChild(wrap);
   }
@@ -722,8 +753,6 @@
         return;
       }
 
-      const params = new URLSearchParams(location.search);
-      const isConfirmStep = params.get('try') === 'confirm';
       let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
 
       let panel = document.getElementById(PANEL_ID);
@@ -736,15 +765,12 @@
       title.textContent = 'Auto Farm';
       panel.appendChild(title);
 
-      if (isConfirmStep) {
-        const info = document.createElement('div');
-        info.textContent = settings.autoConfirm
-          ? 'Tentando confirmar automaticamente (seletor não verificado)...'
-          : 'Na tela de confirmação. Confirme manualmente — auto-confirmar está desligado.';
-        panel.appendChild(info);
-        if (settings.autoConfirm) tryAutoConfirm(log);
-        return;
-      }
+      // A confirmação do ataque acontece via transição client-side (a
+      // URL não muda de um jeito detectável em run(), que só executa
+      // uma vez por carregamento real de página) — por isso o clique em
+      // "Enviar ataque" é tratado dentro do próprio fluxo de envio
+      // abaixo (fillAndSubmitAttack -> aguardar #troop_confirm_submit),
+      // não como uma tela separada.
 
       renderSettingsForm(panel, settings, async (patch) => {
         settings = { ...settings, ...patch };
@@ -804,14 +830,29 @@
           btn.disabled = true;
           btn.textContent = 'Aguardando alvo...';
           const result = await fillAndSubmitAttack(settings.unit, amount, target.x, target.y);
-          btn.disabled = false;
-          btn.textContent = settings.dryRun ? 'Simular' : 'Enviar';
           if (!result.ok) {
+            btn.disabled = false;
+            btn.textContent = settings.dryRun ? 'Simular' : 'Enviar';
             log.error('Falha ao preencher/enviar:', result.reason);
             return;
           }
           await ctx.storage.set(cooldownKey(myVillage.id, target.id), Date.now());
-          log.info(`Enviado: ${amount} "${settings.unit}" -> ${target.x}|${target.y}`);
+          log.info(`Alvo confirmado, aguardando tela de "Enviar ataque"...`);
+
+          const confirmBtn = await waitForConfirmButton();
+          btn.disabled = false;
+          btn.textContent = settings.dryRun ? 'Simular' : 'Enviar';
+
+          if (!confirmBtn) {
+            log.warn('A tela de confirmação não apareceu a tempo — confira manualmente se o ataque ficou pendente.');
+            return;
+          }
+          if (settings.autoConfirm) {
+            log.info(`Auto-confirmar: clicando em "Enviar ataque" -> ${target.x}|${target.y}.`);
+            confirmBtn.click();
+          } else {
+            log.info('Na tela de confirmação — confirme manualmente (auto-confirmar está desligado).');
+          }
         });
         row.appendChild(btn);
         listEl.appendChild(row);

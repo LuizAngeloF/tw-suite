@@ -9,9 +9,10 @@ Não é afiliado à InnoGames. Automatizar o jogo viola as regras oficiais do Tr
 **Fase 0 (núcleo) e Fase 1 (Auto Farm) prontas e confirmadas ao vivo.**
 
 - **Núcleo**: menu, armazenamento, sincronização de horário do servidor, carregador de módulos.
-- **Auto Farm**: ativo na tela da Praça de Reunião (`screen=place`). Lê `/map/village.txt` (dados públicos do mundo) pra achar aldeias bárbaras perto da aldeia atual, mostra a lista num painel com distância, e ao clicar "Enviar" preenche o formulário real de ataque e clica no botão de verdade. **Sobe desligado por padrão** (ative em "TW Suite" → módulo "Auto Farm (sem premium)") e em **modo teste (dry-run)** — nada é enviado de verdade até você desmarcar essa opção no painel do próprio módulo.
+- **Auto Farm**: ativo na tela da Praça de Reunião (`screen=place`). Lê `/map/village.txt` (dados públicos do mundo) pra achar aldeias bárbaras perto da aldeia atual, mostra a lista num painel com distância, e ao clicar "Enviar" preenche o formulário real de ataque, espera o jogo resolver o alvo e chegar na tela de confirmação. **Sobe desligado por padrão** (ative em "TW Suite" → módulo "Auto Farm (sem premium)") e em **modo teste (dry-run)** — nada é enviado de verdade até você desmarcar essa opção no painel do próprio módulo.
   - Não depende do Assistente de Saque nativo (que é premium neste mundo).
-  - O clique automático no botão de "Confirmar" da tela seguinte ainda não foi testado ao vivo — por enquanto, confirme manualmente depois de clicar em "Enviar". Ver [`docs/verification-log.md`](docs/verification-log.md).
+  - Testado ponta a ponta: descoberta de alvo → preenchimento → resolução do alvo → tela de confirmação → botão "Enviar ataque" identificado.
+  - **Auto-confirmar continua desligado por padrão** mesmo já verificado — é uma ação definitiva (as tropas saem de verdade), então é opt-in por segurança. Ative marcando "Auto-confirmar envio" no painel do módulo quando tiver certeza. Ver [`docs/verification-log.md`](docs/verification-log.md).
 
 Módulos planejados, em ordem: ~~Auto Farm~~ → Agendador de Comandos → Construção Automática → Notificações (Discord/WhatsApp).
 
