@@ -4,7 +4,7 @@ Painel para cadastrar suas contas e escolher o que cada uma automatiza. O script
 
 ## Instalação
 
-1. Atualize o **TW Suite no Tampermonkey para a v1.3.0** ou mais nova.
+1. Atualize o **TW Suite no Tampermonkey para a v1.4.0** ou mais nova.
 2. Baixe a pasta do projeto (ou pelo menos `dashboard.html` + `start-dashboard.bat`, os dois juntos na mesma pasta).
 3. Dê **2 cliques em `start-dashboard.bat`**. Abre uma aba em `http://localhost:8787/dashboard.html` — use essa aba, não um arquivo aberto direto.
 4. O selo no topo deve mostrar **Sincronizado**. Deixe a janela preta do `.bat` aberta enquanto usar o dashboard — fechar ela desliga o servidor.
@@ -41,15 +41,23 @@ Contas novas sempre começam em **modo teste**.
 
 O cartão do Auto Farm tem uma lista de modelos de tropas (nome + quantidade de cada unidade, incluindo aríete, catapulta, paladino e nobre). Clique no círculo à esquerda de um modelo pra marcá-lo como ativo — é esse que o script usa pra enviar. A mudança chega na aba do jogo em poucos segundos (o Auto Farm relê a configuração a cada ~8s), sem precisar recarregar a página.
 
+## Auto Farm contínuo
+
+Ligado em modo real, o Auto Farm ataca sozinho, sem parar — não precisa mais clicar em "Enviar" por alvo. Em "Ajustes finos" você configura:
+
+- **Ondas simultâneas** — quantos ataques ficam viajando ao mesmo tempo (pra alvos diferentes). Assim que uma onda volta pra aldeia, o script já manda a próxima sozinho.
+- **Espera por alvo** — quanto tempo esperar antes de reatacar a mesma aldeia bárbara.
+- **Limitar ataques por hora** e **Pausar de madrugada** — dois jeitos independentes de reduzir o ritmo pra não parecer automação o tempo todo. Os dois ficam desligados por padrão (farm sem limite, 24h) — o card avisa o risco disso.
+
 ## Status ao vivo
 
-Depois que o script roda pelo menos uma vez numa conta (até ~90s após abrir o jogo), o dossiê ganha um cartão **Ao vivo** com barras de recursos, tropas paradas na aldeia e um aviso quando há ataque a caminho. O dashboard busca essa informação a cada ~20s enquanto estiver aberto.
+Depois que o script roda pelo menos uma vez numa conta (até ~90s após abrir o jogo), o dossiê ganha um cartão **Ao vivo** com barras de recursos, tropas paradas na aldeia e um aviso quando há ataque a caminho. Com o módulo **Construção** ligado, o mesmo cartão também mostra o que está sendo construído agora e o tempo restante. O dashboard busca essa informação a cada ~20s enquanto estiver aberto.
 
 ## Se não sincronizar
 
 1. **Primeiro, use `start-dashboard.bat`** em vez do arquivo direto — resolve a maioria dos casos, porque tira a permissão de arquivo local da equação inteira.
 2. Com o dashboard aberto em `http://localhost:8787/dashboard.html`, olhe o canto inferior esquerdo da aba. Deve aparecer um selo:
-   - **Nenhum selo** → o Tampermonkey não rodou o script nessa aba. Confirme que o TW Suite está atualizado (v1.3.0+) e habilitado no painel do Tampermonkey.
+   - **Nenhum selo** → o Tampermonkey não rodou o script nessa aba. Confirme que o TW Suite está atualizado (v1.4.0+) e habilitado no painel do Tampermonkey.
    - **"aguardando dashboard..."** → o script rodou mas não trocou mensagem com a página. Recarregue a aba uma vez; se persistir, é bug — me avise.
    - **"conectado ao dashboard"** (fica verde) → a ponte funcionou; se o selo do topo ainda disser "Só neste navegador", recarregue a página uma vez.
 3. No jogo, abra o painel **TW Suite** (link no menu ou botão flutuante). Ele mostra um bloco **"Sincronização com o dashboard"** com `game_data.world`, o nick e a **chave calculada** (ex.: `br144:promiss`).
@@ -61,4 +69,4 @@ Depois que o script roda pelo menos uma vez numa conta (até ~90s após abrir o 
 
 - **Ligar/desligar** um módulo só vale a partir do próximo carregamento de página. Já **ajustar valores** de um módulo que já está ligado (modelo de tropas, quantidade, intervalo) chega sem precisar recarregar.
 - Precisa do navegador aberto com a aba do jogo carregada — diferente de serviços que rodam num servidor deles, aqui a automação para se você fechar a aba ou desligar o PC.
-- Vários módulos (recrutamento, coleta, construção, balanceador) foram reescritos nesta versão mas ainda não testados contra o jogo ao vivo — todos nascem em **modo teste**, ligue o modo real um de cada vez.
+- Recrutamento, Coleta, Balanceador, e o rastreio de "ondas no ar" do Auto Farm ainda não foram testados contra o jogo ao vivo — todos nascem em **modo teste**, ligue o modo real um de cada vez. A Construção já foi confirmada funcionando (constrói de verdade e mostra a fila certa).

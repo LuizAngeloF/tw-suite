@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.3.1
+// @version      1.4.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1348,59 +1348,48 @@
 })();
 
 // ============================================================
-// MÓDULO: auto-farm (Fase 1)
+// MÓDULO: auto-farm (reescrito v1.4.0 — ondas contínuas)
 //
-// Farm sem depender do Assistente de Saque (que é premium neste
-// mundo — confirmado ao vivo em 2026-09-19, ver verification-log).
-// Em vez disso: lê /map/village.txt (arquivo público do próprio
-// jogo, confirmado acessível sem login) pra achar aldeias bárbaras
-// perto da aldeia atual, mostra a lista num painel na Praça de
-// Reunião, e ao clicar "Enviar" manda as duas requisições reais de
-// envio via fetch() (ver submitAttackStep1/submitAttackStep2) — lidas
-// ao vivo de um HAR de um envio genuíno em 2026-09-19 (ver
-// docs/verification-log.md pro payload completo).
+// Até v1.3: encontrava alvos e mostrava botão "Enviar" por linha —
+// exigia clique humano em cada ataque. Pedido do usuário: farm
+// totalmente autônomo — mantém até N ataques ("ondas") viajando ao
+// mesmo tempo, e assim que uma onda volta pra casa, dispara a
+// próxima sozinho, sem clique nenhum.
 //
-// Por que fetch() em vez de simular clique nos botões reais
-// (#target_attack / #troop_confirm_submit, ambos confirmados ao
-// vivo): tentamos várias formas de simular clique (.click(),
-// mousedown/mouseup/click com coordenadas reais, form.requestSubmit())
-// e nenhuma disparava a navegação de verdade — o HAR provou que as
-// duas etapas são submissões de formulário reais (POST com reload),
-// não AJAX, e por algum motivo (não totalmente esclarecido — pode
-// ser exigência de user activation do navegador, ou algo específico
-// do handler do jogo) cliques sintéticos não completavam a
-// submissão. Replicar as duas requisições nós mesmos, lendo os
-// campos/tokens ao vivo do formulário/resposta (nunca fixos no
-// código), é o método confirmado funcionando.
+// Envio em si: VERIFIED (mesmo `S.sendCommand`, payload idêntico ao
+// validado ao vivo em 2026-09-19 — dois POSTs reais, ver
+// verification-log.md). O que é NOVO e ainda UNVERIFIED nesta versão:
+//   - Rastreio de "ondas no ar" — assume que uma onda volta em
+//     2×durationMs (ida+volta) contado a partir do envio. Se as
+//     tropas morrerem no ataque (sem voltar) ou o jogo cobrar tempo
+//     diferente por algum motivo, o contador de ondas pode ficar
+//     desalinhado da realidade — isso só afasta o farm do teto
+//     configurado (fica mais conservador), nunca manda mais ataque
+//     do que devia.
+//   - Limite por hora e pausa noturna — lógica simples de contagem/
+//     janela de horário, nunca testada em uso real.
 // ============================================================
 (function registerAutoFarmModule() {
   'use strict';
 
+  const TW = window.TWSuite;
+  const S = TW.shared;
   const MODULE_ID = 'auto-farm';
-  const PANEL_ID = 'twsuite-autofarm-panel';
-  const VILLAGE_CACHE_KEY = 'auto-farm:villageIndexCache';
-  const VILLAGE_CACHE_TTL_MS = 3 * 60 * 60 * 1000; // village.txt tem ~3MB; evita rebaixar toda hora
 
-  const UNIT_LABELS = {
-    spear: 'Lanceiro',
-    sword: 'Espadachim',
-    axe: 'Bárbaro',
-    archer: 'Arqueiro',
-    spy: 'Explorador',
-    light: 'Cavalaria leve',
-    marcher: 'Arqueiro a cavalo',
-    heavy: 'Cavalaria pesada',
-    ram: 'Aríete',
-    catapult: 'Catapulta',
-    knight: 'Paladino',
-    snob: 'Nobre',
-  };
+  const UNIT_FIELDS = S.UNITS;
+  const UNIT_LABELS = S.UNIT_LABELS;
 
   const DEFAULT_SETTINGS = {
     templates: [], // { id, name, units: { spear: 10, sword: 10, ... } }
     activeTemplateId: null,
     maxDistance: 12,
     cooldownMinutes: 30,
+    maxConcurrentWaves: 1,
+    enableHourlyLimit: false,
+    attacksPerHour: 20,
+    enableNightPause: false,
+    nightPauseStart: '00:00',
+    nightPauseEnd: '06:00',
     dryRun: true,
   };
 
@@ -1408,192 +1397,84 @@
     return 'tpl_' + Math.random().toString(36).slice(2, 10);
   }
 
-  function dist(ax, ay, bx, by) {
-    return Math.hypot(ax - bx, ay - by);
-  }
-
-  function parseVillageIndex(text) {
-    const villages = [];
-    const lines = text.split('\n');
-    for (const line of lines) {
-      if (!line) continue;
-      const parts = line.split(',');
-      if (parts.length < 5) continue;
-      const x = Number(parts[2]);
-      const y = Number(parts[3]);
-      if (Number.isNaN(x) || Number.isNaN(y)) continue;
-      villages.push({ id: parts[0], x, y, owner: parts[4] });
-    }
-    return villages;
-  }
-
-  async function getVillageIndex(storage, log) {
-    const cached = await storage.get(VILLAGE_CACHE_KEY, null);
-    const now = Date.now();
-    if (cached && cached.fetchedAt && now - cached.fetchedAt < VILLAGE_CACHE_TTL_MS && cached.text) {
-      return parseVillageIndex(cached.text);
-    }
-    try {
-      const res = await fetch('/map/village.txt', { credentials: 'omit' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      await storage.set(VILLAGE_CACHE_KEY, { fetchedAt: now, text });
-      return parseVillageIndex(text);
-    } catch (e) {
-      log.error('Falha ao buscar /map/village.txt:', e);
-      return cached && cached.text ? parseVillageIndex(cached.text) : [];
-    }
-  }
-
   function cooldownKey(sourceId, targetId) {
     return `auto-farm:lastSent:${sourceId}:${targetId}`;
   }
+  function wavesKey(vid) {
+    return `auto-farm:waves:${vid}`;
+  }
+  function sendLogKey(vid) {
+    return `auto-farm:sendLog:${vid}`;
+  }
 
-  async function findTargets(ctx, myVillage, settings) {
-    const villages = await getVillageIndex(ctx.storage, ctx.log);
+  async function getWaves(storage, vid) {
+    return (await storage.get(wavesKey(vid), [])) || [];
+  }
+  async function pruneWaves(storage, vid) {
+    const waves = await getWaves(storage, vid);
+    const now = Date.now();
+    const alive = waves.filter((w) => w.returnAt > now);
+    if (alive.length !== waves.length) await storage.set(wavesKey(vid), alive);
+    return alive;
+  }
+  async function addWave(storage, vid, wave) {
+    const waves = await getWaves(storage, vid);
+    waves.push(wave);
+    await storage.set(wavesKey(vid), waves);
+  }
+
+  async function recordSend(storage, vid) {
+    const cutoff = Date.now() - 3600000;
+    const log = ((await storage.get(sendLogKey(vid), [])) || []).filter((t) => t > cutoff);
+    log.push(Date.now());
+    await storage.set(sendLogKey(vid), log);
+  }
+  async function hourlyCount(storage, vid) {
+    const cutoff = Date.now() - 3600000;
+    const log = (await storage.get(sendLogKey(vid), [])) || [];
+    return log.filter((t) => t > cutoff).length;
+  }
+
+  function parseHM(s) {
+    const m = String(s || '').match(/^(\d{1,2}):(\d{2})$/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  }
+  function isNightPaused(settings) {
+    if (!settings.enableNightPause) return false;
+    const start = parseHM(settings.nightPauseStart);
+    const end = parseHM(settings.nightPauseEnd);
+    if (start == null || end == null || start === end) return false;
+    const now = new Date();
+    const cur = now.getHours() * 60 + now.getMinutes();
+    return start < end ? (cur >= start && cur < end) : (cur >= start || cur < end);
+  }
+
+  async function findTargets(storage, myVillage, settings, excludeIds) {
+    const villages = await S.getVillageIndex();
     const now = Date.now();
     const candidates = [];
     for (const v of villages) {
       if (v.owner !== '0') continue;
-      if (v.id === String(myVillage.id)) continue;
-      const d = dist(myVillage.x, myVillage.y, v.x, v.y);
+      if (String(v.id) === String(myVillage.id)) continue;
+      if (excludeIds.has(String(v.id))) continue;
+      const d = S.dist(myVillage.x, myVillage.y, v.x, v.y);
       if (d > settings.maxDistance) continue;
-      const lastSent = await ctx.storage.get(cooldownKey(myVillage.id, v.id), 0);
-      if (now - lastSent < settings.cooldownMinutes * 60 * 1000) continue;
+      const lastSent = await storage.get(cooldownKey(myVillage.id, v.id), 0);
+      if (now - lastSent < settings.cooldownMinutes * 60000) continue;
       candidates.push({ ...v, distance: d });
     }
     candidates.sort((a, b) => a.distance - b.distance);
-    return candidates.slice(0, 15);
+    return candidates;
   }
 
   // ------------------------------------------------------------
-  // Envio via fetch() direto, replicando as duas requisições POST
-  // reais capturadas via HAR (2026-09-19, envio genuíno confirmado
-  // pelo usuário — ver docs/verification-log.md para os payloads
-  // completos). Depois de MUITAS tentativas de simular clique
-  // (.click(), mousedown/mouseup/click com coordenadas reais,
-  // form.requestSubmit()) nenhuma disparava a navegação real — o HAR
-  // provou que tanto "Ataque" quanto "Enviar ataque" são submissões
-  // de formulário de verdade (POST com reload de página), não AJAX.
-  // Em vez de insistir em simular o clique, montamos as mesmas duas
-  // requisições nós mesmos, lendo os campos (inclusive o token
-  // escondido de nome aleatório, e os tokens ch/h da 2ª etapa) direto
-  // do formulário real da página / da resposta, nunca fixos no
-  // código — assim não fica frágil se os nomes mudarem de novo.
+  // UI: gerenciador de modelos de tropas (igual às versões
+  // anteriores — o dashboard também edita os mesmos dados, essa
+  // parte só existe pra quem prefere editar sem sair do jogo).
   // ------------------------------------------------------------
-
-  const UNIT_FIELDS = ['spear', 'sword', 'axe', 'archer', 'spy', 'light', 'marcher', 'heavy', 'ram', 'catapult', 'knight', 'snob'];
-
-  function formToParams(formEl, overrides) {
-    const fd = new FormData(formEl);
-    for (const [k, v] of Object.entries(overrides)) fd.set(k, v);
-    return new URLSearchParams(fd);
-  }
-
-  function parseHtml(html) {
-    return new DOMParser().parseFromString(html, 'text/html');
-  }
-
-  async function postForm(url, params) {
-    const res = await fetch(url, { method: 'POST', body: params, credentials: 'same-origin' });
-    const text = await res.text();
-    return { httpOk: res.ok, status: res.status, text };
-  }
-
-  // Etapa 1: envia a aldeia/coordenada/tropas — equivalente a
-  // preencher o formulário da Praça de Reunião e clicar "Ataque".
-  // Retorna o HTML da tela de confirmação (ou erro).
-  async function submitAttackStep1(villageId, units, x, y) {
-    const formEl = document.querySelector('#inputx')?.form || document.querySelector('#inputx')?.closest('form');
-    if (!formEl) return { ok: false, reason: 'formulário da Praça de Reunião não encontrado nesta página' };
-
-    const overrides = { x: String(x), y: String(y), target_type: 'coord', attack: 'Ataque' };
-    for (const u of UNIT_FIELDS) overrides[u] = units[u] > 0 ? String(units[u]) : '';
-
-    const params = formToParams(formEl, overrides);
-    const url = `game.php?village=${villageId}&screen=place&try=confirm`;
-    const { httpOk, status, text } = await postForm(url, params);
-
-    if (!httpOk) return { ok: false, reason: `etapa 1 (resolver alvo) falhou: HTTP ${status}` };
-    if (text.includes('error_box')) return { ok: false, reason: 'etapa 1: o jogo recusou (alvo/tropas inválidos, ou fora de alcance).' };
-    return { ok: true, html: text };
-  }
-
-  // Etapa 2: confirma o envio usando os tokens (ch/h) retornados pela
-  // etapa 1 — equivalente a clicar "Enviar ataque" na tela seguinte.
-  async function submitAttackStep2(villageId, units, x, y, confirmHtml, csrf) {
-    const confirmDoc = parseHtml(confirmHtml);
-    const confirmForm = confirmDoc.querySelector('#troop_confirm_submit')?.closest('form') || confirmDoc.querySelector('form');
-    if (!confirmForm) return { ok: false, reason: 'etapa 2: não achei o formulário de confirmação na resposta da etapa 1' };
-
-    const overrides = {
-      attack: 'true',
-      cb: 'troop_confirm_submit',
-      submit_confirm: 'Enviar ataque',
-      building: 'main',
-      x: String(x),
-      y: String(y),
-      source_village: String(villageId),
-      village: String(villageId),
-    };
-    // O token "h" não vem no HTML estático (o jogo insere via JS antes
-    // de enviar de verdade — DOMParser não roda script, então nunca
-    // aparece no formulário parseado). Confirmado ao vivo (2026-09-19):
-    // é exatamente game_data.csrf. Sem ele o servidor responde 200 mas
-    // não processa nada, em vez de redirecionar (302) como num envio
-    // real bem-sucedido.
-    if (csrf) overrides.h = csrf;
-    for (const u of UNIT_FIELDS) overrides[u] = String(units[u] || 0);
-
-    const params = formToParams(confirmForm, overrides);
-    const url = `game.php?village=${villageId}&screen=place&action=command`;
-    const { httpOk, status, text } = await postForm(url, params);
-
-    if (!httpOk) return { ok: false, reason: `etapa 2 (confirmar) falhou: HTTP ${status}` };
-    if (text.includes('error_box')) return { ok: false, reason: 'etapa 2: o jogo recusou a confirmação (token expirado? tente de novo).' };
-    return { ok: true };
-  }
-
-  async function submitAttack(villageId, units, x, y, csrf) {
-    const step1 = await submitAttackStep1(villageId, units, x, y);
-    if (!step1.ok) return step1;
-    return submitAttackStep2(villageId, units, x, y, step1.html, csrf);
-  }
-
-  function buildPanel() {
-    const el = document.createElement('div');
-    el.id = PANEL_ID;
-    Object.assign(el.style, {
-      position: 'fixed',
-      top: '60px',
-      left: '16px',
-      width: '300px',
-      maxHeight: '75vh',
-      overflowY: 'auto',
-      background: '#f4e4bc',
-      border: '2px solid #7a5230',
-      borderRadius: '6px',
-      padding: '10px',
-      zIndex: 99998,
-      fontSize: '12px',
-      color: '#1a1a1a',
-      fontFamily: 'Verdana, Arial, sans-serif',
-      boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
-    });
-    document.body.appendChild(el);
-    return el;
-  }
-
-  // Grade compacta com um campo numérico por tropa (as 12 do jogo),
-  // no estilo da própria tela "Modelos de tropas" do jogo.
   function createUnitGrid(initialValues) {
     const grid = document.createElement('div');
-    Object.assign(grid.style, {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: '2px 8px',
-      margin: '4px 0',
-    });
+    Object.assign(grid.style, { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 8px', margin: '4px 0' });
     const inputs = {};
     for (const u of UNIT_FIELDS) {
       const label = document.createElement('label');
@@ -1620,12 +1501,10 @@
     };
   }
 
-  // Seletor de modelo ativo + criar/editar/excluir modelos nomeados
-  // (nome + quantidade por tropa), salvos nas configurações do módulo.
   function renderTemplateManager(container, settings, onSettingsChange) {
     const wrap = document.createElement('div');
     wrap.style.marginBottom = '8px';
-    wrap.style.borderBottom = '1px solid #7a5230';
+    wrap.style.borderBottom = '1px solid #c1a264';
     wrap.style.paddingBottom = '8px';
 
     const label = document.createElement('div');
@@ -1655,20 +1534,12 @@
 
     const newBtn = document.createElement('button');
     newBtn.textContent = '+Novo';
-    newBtn.style.fontSize = '11px';
-
     const editBtn = document.createElement('button');
     editBtn.textContent = 'Editar';
-    editBtn.style.fontSize = '11px';
-
     const delBtn = document.createElement('button');
     delBtn.textContent = 'Excluir';
-    delBtn.style.fontSize = '11px';
 
-    row.appendChild(select);
-    row.appendChild(newBtn);
-    row.appendChild(editBtn);
-    row.appendChild(delBtn);
+    row.append(select, newBtn, editBtn, delBtn);
     wrap.appendChild(row);
 
     const editorHost = document.createElement('div');
@@ -1688,7 +1559,6 @@
 
       const saveBtn = document.createElement('button');
       saveBtn.textContent = existingTpl ? 'Salvar alterações' : 'Criar modelo';
-      saveBtn.style.fontSize = '11px';
       saveBtn.style.marginTop = '4px';
       saveBtn.addEventListener('click', () => {
         const name = nameInput.value.trim() || 'Sem nome';
@@ -1707,16 +1577,10 @@
 
       const cancelBtn = document.createElement('button');
       cancelBtn.textContent = 'Cancelar';
-      cancelBtn.style.fontSize = '11px';
       cancelBtn.style.marginTop = '4px';
-      cancelBtn.addEventListener('click', () => {
-        editorHost.innerHTML = '';
-      });
+      cancelBtn.addEventListener('click', () => { editorHost.innerHTML = ''; });
 
-      editorHost.appendChild(nameInput);
-      editorHost.appendChild(grid.el);
-      editorHost.appendChild(saveBtn);
-      editorHost.appendChild(cancelBtn);
+      editorHost.append(nameInput, grid.el, saveBtn, cancelBtn);
     }
 
     newBtn.addEventListener('click', () => openEditor(null));
@@ -1736,41 +1600,87 @@
     container.appendChild(wrap);
   }
 
-  function renderMiscSettings(container, settings, onChange) {
+  function renderPaceSettings(container, settings, onChange) {
     const wrap = document.createElement('div');
     wrap.style.marginBottom = '8px';
-    wrap.style.borderBottom = '1px solid #7a5230';
+    wrap.style.borderBottom = '1px solid #c1a264';
     wrap.style.paddingBottom = '8px';
+    wrap.style.display = 'flex';
+    wrap.style.flexDirection = 'column';
+    wrap.style.gap = '4px';
 
+    const row1 = document.createElement('div');
     const distInput = document.createElement('input');
     distInput.type = 'number';
     distInput.min = '1';
     distInput.value = String(settings.maxDistance);
-    distInput.style.width = '50px';
-    distInput.title = 'Distância máxima (campos)';
-    distInput.addEventListener('change', () =>
-      onChange({ maxDistance: Math.max(1, Number(distInput.value) || 1) })
-    );
+    distInput.style.width = '48px';
+    distInput.addEventListener('change', () => onChange({ maxDistance: Math.max(1, Number(distInput.value) || 1) }));
+    row1.append('Alcance: ', distInput, ' campos');
+
+    const row2 = document.createElement('div');
+    const wavesInput = document.createElement('input');
+    wavesInput.type = 'number';
+    wavesInput.min = '1';
+    wavesInput.max = '20';
+    wavesInput.value = String(settings.maxConcurrentWaves);
+    wavesInput.style.width = '48px';
+    wavesInput.addEventListener('change', () => onChange({ maxConcurrentWaves: Math.max(1, Number(wavesInput.value) || 1) }));
+    row2.append('Ondas simultâneas: ', wavesInput);
+
+    const row3 = document.createElement('div');
+    const cdInput = document.createElement('input');
+    cdInput.type = 'number';
+    cdInput.min = '1';
+    cdInput.value = String(settings.cooldownMinutes);
+    cdInput.style.width = '48px';
+    cdInput.addEventListener('change', () => onChange({ cooldownMinutes: Math.max(1, Number(cdInput.value) || 1) }));
+    row3.append('Espera por alvo: ', cdInput, ' min');
+
+    const row4 = document.createElement('label');
+    const hourlyCb = document.createElement('input');
+    hourlyCb.type = 'checkbox';
+    hourlyCb.checked = settings.enableHourlyLimit;
+    const hourlyInput = document.createElement('input');
+    hourlyInput.type = 'number';
+    hourlyInput.min = '1';
+    hourlyInput.value = String(settings.attacksPerHour);
+    hourlyInput.style.width = '48px';
+    hourlyCb.addEventListener('change', () => onChange({ enableHourlyLimit: hourlyCb.checked }));
+    hourlyInput.addEventListener('change', () => onChange({ attacksPerHour: Math.max(1, Number(hourlyInput.value) || 1) }));
+    row4.append(hourlyCb, ' Limite de ', hourlyInput, ' ataques/hora');
+
+    const row5 = document.createElement('label');
+    const nightCb = document.createElement('input');
+    nightCb.type = 'checkbox';
+    nightCb.checked = settings.enableNightPause;
+    const startInput = document.createElement('input');
+    startInput.type = 'text';
+    startInput.placeholder = '00:00';
+    startInput.value = settings.nightPauseStart;
+    startInput.style.width = '44px';
+    const endInput = document.createElement('input');
+    endInput.type = 'text';
+    endInput.placeholder = '06:00';
+    endInput.value = settings.nightPauseEnd;
+    endInput.style.width = '44px';
+    nightCb.addEventListener('change', () => onChange({ enableNightPause: nightCb.checked }));
+    startInput.addEventListener('change', () => onChange({ nightPauseStart: startInput.value.trim() }));
+    endInput.addEventListener('change', () => onChange({ nightPauseEnd: endInput.value.trim() }));
+    row5.append(nightCb, ' Pausar de ', startInput, ' até ', endInput, ' (seu horário local)');
 
     const dryRunLabel = document.createElement('label');
-    dryRunLabel.style.display = 'block';
-    dryRunLabel.style.marginTop = '4px';
     const dryRunCb = document.createElement('input');
     dryRunCb.type = 'checkbox';
     dryRunCb.checked = settings.dryRun;
     dryRunCb.addEventListener('change', () => onChange({ dryRun: dryRunCb.checked }));
-    dryRunLabel.appendChild(dryRunCb);
-    dryRunLabel.appendChild(document.createTextNode(' Modo teste (não envia de verdade)'));
+    dryRunLabel.append(dryRunCb, ' Modo teste (não envia de verdade)');
 
-    wrap.appendChild(document.createTextNode('Alcance: '));
-    wrap.appendChild(distInput);
-    wrap.appendChild(document.createTextNode(' campos'));
-    wrap.appendChild(dryRunLabel);
-
+    wrap.append(row1, row2, row3, row4, row5, dryRunLabel);
     container.appendChild(wrap);
   }
 
-  window.TWSuite.registerModule({
+  TW.registerModule({
     id: MODULE_ID,
     name: 'Auto Farm (sem premium)',
     screens: ['place'],
@@ -1787,149 +1697,131 @@
       let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
       const myVillage = { id: gd.village.id, x: gd.village.x, y: gd.village.y };
 
-      let panel = document.getElementById(PANEL_ID);
-      if (!panel) panel = buildPanel();
+      const ui = S.card(MODULE_ID, 'Auto Farm');
+      const statusBox = S.h('div', { style: { fontSize: '11px', marginBottom: '6px' }, text: 'Iniciando...' });
+      const templateHost = S.h('div');
+      const paceHost = S.h('div');
+      const targetsHost = S.h('div', { class: 'tws-list' });
 
       async function persist(patch) {
         settings = { ...settings, ...patch };
         await storage.setModuleSettings(MODULE_ID, settings);
-        renderAll();
+        renderConfig();
       }
 
       function activeTemplate() {
         return settings.templates.find((t) => t.id === settings.activeTemplateId) || null;
       }
 
-      async function sendToTarget(target, row, btn) {
-        const tpl = activeTemplate();
-        if (!tpl) {
-          log.warn('Nenhum modelo de tropas selecionado — crie um em "Modelo de tropas" antes de enviar.');
-          return;
-        }
-
-        const sendUnits = {};
-        let anyAvailable = false;
-        let anyCapped = false;
-        for (const u of UNIT_FIELDS) {
-          const requested = tpl.units[u] || 0;
-          if (requested <= 0) {
-            sendUnits[u] = 0;
-            continue;
-          }
-          const unitInput = document.querySelector('#unit_input_' + u);
-          const available = unitInput ? Number(unitInput.dataset.allCount || 0) : 0;
-          const send = Math.min(requested, available);
-          sendUnits[u] = send;
-          if (send > 0) anyAvailable = true;
-          if (send < requested) anyCapped = true;
-        }
-
-        const describe = () =>
-          UNIT_FIELDS.filter((u) => sendUnits[u] > 0)
-            .map((u) => `${sendUnits[u]} ${UNIT_LABELS[u]}`)
-            .join(', ') || '(nada disponível)';
-
-        if (settings.dryRun) {
-          log.info(`(modo teste) modelo "${tpl.name}" enviaria [${describe()}] para ${target.x}|${target.y}${anyCapped ? ' (algumas tropas limitadas ao disponível)' : ''}`);
-          return;
-        }
-
-        if (!anyAvailable) {
-          log.warn(`Nenhuma tropa do modelo "${tpl.name}" disponível nesta aldeia agora — não enviado.`);
-          return;
-        }
-        if (anyCapped) {
-          log.warn(`Modelo "${tpl.name}" parcialmente disponível — enviando [${describe()}] em vez do modelo completo.`);
-        }
-
-        btn.disabled = true;
-        btn.textContent = 'Enviando...';
-        const csrf = gameApi.getGameData()?.csrf;
-        const result = await submitAttack(myVillage.id, sendUnits, target.x, target.y, csrf);
-        btn.disabled = false;
-        btn.textContent = 'Enviar';
-
-        if (!result.ok) {
-          log.error('Falha ao enviar:', result.reason, '— alvo continua na lista.');
-          return;
-        }
-
-        log.info(`Enviado: [${describe()}] -> ${target.x}|${target.y}.`);
-        await storage.set(cooldownKey(myVillage.id, target.id), Date.now());
-        row.remove();
+      function renderConfig() {
+        templateHost.innerHTML = '';
+        paceHost.innerHTML = '';
+        renderTemplateManager(templateHost, settings, persist);
+        renderPaceSettings(paceHost, settings, persist);
       }
 
-      async function renderAll() {
-        panel.innerHTML = '';
-
-        const title = document.createElement('div');
-        title.style.fontWeight = 'bold';
-        title.style.marginBottom = '6px';
-        title.textContent = 'Auto Farm';
-        panel.appendChild(title);
-
-        renderTemplateManager(panel, settings, persist);
-        renderMiscSettings(panel, settings, persist);
-
-        const resetBtn = document.createElement('button');
-        resetBtn.textContent = 'Restaurar alvos';
-        resetBtn.style.fontSize = '11px';
-        resetBtn.style.marginBottom = '6px';
-        resetBtn.title = 'Limpa o cooldown desta aldeia — alvos já tentados voltam a aparecer';
-        resetBtn.addEventListener('click', async () => {
+      const resetBtn = S.h('button', {
+        text: 'Restaurar alvos', style: { fontSize: '11px', marginBottom: '6px', width: '100%' },
+        title: 'Limpa o cooldown desta aldeia — alvos já tentados voltam a aparecer',
+        onclick: async () => {
           const removed = await storage.removeByPrefix(`auto-farm:lastSent:${myVillage.id}:`);
           log.info(`${removed} alvo(s) restaurado(s).`);
-          renderAll();
-        });
-        panel.appendChild(resetBtn);
+          refreshTargetsPreview();
+        },
+      });
 
-        const listEl = document.createElement('div');
-        listEl.textContent = 'Buscando aldeias bárbaras próximas...';
-        panel.appendChild(listEl);
-
-        const targets = await findTargets(ctx, myVillage, settings);
-        listEl.innerHTML = '';
-        if (targets.length === 0) {
-          listEl.textContent = 'Nenhum alvo bárbaro disponível no alcance / fora do cooldown.';
+      async function refreshTargetsPreview() {
+        const waves = await pruneWaves(storage, myVillage.id);
+        const excludeIds = new Set(waves.map((w) => String(w.targetId)));
+        const targets = await findTargets(storage, myVillage, settings, excludeIds).catch(() => []);
+        targetsHost.innerHTML = '';
+        if (!targets.length) {
+          targetsHost.appendChild(S.h('div', { class: 'tws-muted', text: 'Nenhum alvo elegível agora.' }));
           return;
         }
-
-        for (const target of targets) {
-          const row = document.createElement('div');
-          row.style.display = 'flex';
-          row.style.justifyContent = 'space-between';
-          row.style.alignItems = 'center';
-          row.style.margin = '3px 0';
-
-          const label = document.createElement('span');
-          label.textContent = `${target.x}|${target.y} (${target.distance.toFixed(1)})`;
-          row.appendChild(label);
-
-          const btn = document.createElement('button');
-          btn.textContent = settings.dryRun ? 'Simular' : 'Enviar';
-          btn.style.fontSize = '11px';
-          btn.addEventListener('click', () => sendToTarget(target, row, btn));
-          row.appendChild(btn);
-          listEl.appendChild(row);
+        for (const t of targets.slice(0, 8)) {
+          targetsHost.appendChild(S.h('div', { class: 'tws-row', text: `${t.x}|${t.y} (${t.distance.toFixed(1)})` }));
         }
       }
 
-      await renderAll();
+      ui.body.append(statusBox, templateHost, paceHost, resetBtn,
+        S.h('div', { style: { fontWeight: 'bold', fontSize: '10px', marginTop: '2px' }, text: 'Próximos alvos' }), targetsHost);
+      renderConfig();
+      await refreshTargetsPreview();
 
-      // Live-refresh: se o dashboard mudar os modelos de tropas desta
-      // conta enquanto a página está aberta, TWSuite.storage.set('profiles', ...)
-      // muda — reaplicamos o perfil (window.TWSuite.applyProfileNow, ver core)
-      // e, se os modelos realmente mudaram, re-renderizamos sem precisar
-      // recarregar a página.
+      // --------------------------------------------------------
+      // Loop autônomo: a cada ~20-35s verifica se pode mandar mais
+      // uma onda (ondas no ar < máximo, ritmo permite, tem alvo
+      // elegível) e envia sozinho — sem precisar de clique.
+      // --------------------------------------------------------
+      S.loop(`${MODULE_ID}:${myVillage.id}`, async () => {
+        const s = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+        const tpl = (s.templates || []).find((t) => t.id === s.activeTemplateId);
+        if (!tpl) { statusBox.textContent = 'Sem modelo de tropas ativo — crie um acima.'; return; }
+
+        const waves = await pruneWaves(storage, myVillage.id);
+        const maxWaves = Math.max(1, Number(s.maxConcurrentWaves) || 1);
+        if (waves.length >= maxWaves) {
+          statusBox.textContent = `${waves.length}/${maxWaves} onda(s) no ar — aguardando voltar.`;
+          return;
+        }
+        if (isNightPaused(s)) {
+          statusBox.textContent = `Pausado (${s.nightPauseStart}–${s.nightPauseEnd}, horário local).`;
+          return;
+        }
+        if (s.enableHourlyLimit) {
+          const count = await hourlyCount(storage, myVillage.id);
+          if (count >= (Number(s.attacksPerHour) || 20)) {
+            statusBox.textContent = `Limite de ${s.attacksPerHour}/h atingido — aguardando.`;
+            return;
+          }
+        }
+
+        const excludeIds = new Set(waves.map((w) => String(w.targetId)));
+        const targets = await findTargets(storage, myVillage, s, excludeIds);
+        if (!targets.length) {
+          statusBox.textContent = `${waves.length}/${maxWaves} onda(s) no ar — nenhum alvo elegível.`;
+          return;
+        }
+        const target = targets[0];
+
+        if (s.dryRun) {
+          log.info(`(teste) atacaria ${target.x}|${target.y} com modelo "${tpl.name}" (${waves.length}/${maxWaves} ondas simuladas)`);
+          statusBox.textContent = `teste: atacaria ${target.x}|${target.y}`;
+          return;
+        }
+
+        statusBox.textContent = `Enviando para ${target.x}|${target.y}...`;
+        const res = await S.sendCommand({ villageId: myVillage.id, units: tpl.units, x: target.x, y: target.y, type: 'attack', capToAvailable: true });
+        if (!res.ok) {
+          log.warn(`Falha ao atacar ${target.x}|${target.y}:`, res.reason);
+          statusBox.textContent = `falhou: ${res.reason}`;
+          return;
+        }
+
+        await storage.set(cooldownKey(myVillage.id, target.id), Date.now());
+        const roundTripMs = res.durationMs ? res.durationMs * 2 : 30 * 60000; // sem duração lida, assume 30min por segurança
+        await addWave(storage, myVillage.id, { targetId: String(target.id), x: target.x, y: target.y, sentAt: res.sentAt, returnAt: res.sentAt + roundTripMs });
+        await recordSend(storage, myVillage.id);
+
+        log.info(`Atacou ${target.x}|${target.y} com "${tpl.name}".`);
+        statusBox.textContent = `Enviado a ${target.x}|${target.y} · ${waves.length + 1}/${maxWaves} onda(s) no ar.`;
+        refreshTargetsPreview();
+      }, 20000, 35000);
+
+      // Live-refresh: se o dashboard mudar configurações desta conta
+      // enquanto a página está aberta, reaplica o perfil e atualiza a
+      // UI (o loop acima já relê settings a cada ciclo — isso é só
+      // pra UI/preview não ficarem visualmente desatualizados).
       setInterval(async () => {
         if (typeof window.TWSuite.applyProfileNow === 'function') {
           await window.TWSuite.applyProfileNow();
         }
         const fresh = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
-        if (JSON.stringify(fresh.templates) !== JSON.stringify(settings.templates) || fresh.activeTemplateId !== settings.activeTemplateId) {
+        if (JSON.stringify(fresh) !== JSON.stringify(settings)) {
           settings = fresh;
-          log.info('Modelos de tropas atualizados a partir do dashboard.');
-          renderAll();
+          renderConfig();
+          refreshTargetsPreview();
         }
       }, 8000);
     },
@@ -2565,12 +2457,42 @@
     return { counts, total };
   }
 
-  async function buildOnce(vid, s, log) {
+  // Lê a fila REAL exibida na tela (nome, nível-alvo, tempo restante,
+  // hora de conclusão) pra mostrar no painel e no dashboard — sem isso,
+  // o módulo constrói mas fica "mudo": dá pra ver que uma construção
+  // entrou na fila, mas não o que está sendo construído nem quando
+  // termina. UNVERIFIED: extrai por texto (não por seletor fixo) pra
+  // ser resiliente a variações de markup, mas nunca confirmado ao vivo.
+  function readBuildQueue(doc) {
+    const rows = [];
+    for (const tr of doc.querySelectorAll('#build_queue tr[class*="buildorder_"]')) {
+      const cells = [...tr.querySelectorAll('td')].map((td) => td.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
+      if (!cells.length) continue;
+      const first = cells[0];
+      const levelMatch = first.match(/N[íi]vel\s*(\d+)/i);
+      const name = first.replace(/N[íi]vel\s*\d+/i, '').trim() || first;
+      const remaining = cells.find((c) => /^\d{1,2}:\d{2}:\d{2}$/.test(c)) || null;
+      const etaText = cells.find((c) => /\bàs\b/i.test(c)) || null;
+      rows.push({ name, level: levelMatch ? Number(levelMatch[1]) : null, remaining, etaText });
+    }
+    return rows;
+  }
+
+  async function reportQueue(entries) {
+    const key = TW.accountKeyFromGame && TW.accountKeyFromGame();
+    if (!key) return;
+    const accounts = (await TW.storage.get('accounts', {})) || {};
+    accounts[key] = { ...(accounts[key] || {}), buildQueue: entries, buildQueueAt: Date.now() };
+    await TW.storage.set('accounts', accounts);
+  }
+
+  async function buildOnce(vid, vname, s, log) {
     const page = await S.getPage(`/game.php?village=${vid}&screen=main`);
+    const queue = readBuildQueue(page.doc).map((q) => ({ ...q, village: vname }));
     const buildings = buildingsFrom(page.text);
-    if (!buildings) return 'dados do edifício principal não encontrados';
+    if (!buildings) return { status: 'dados do edifício principal não encontrados', queue };
     const { counts, total } = queuedCounts(page.doc);
-    if (total >= s.maxQueue) return `fila cheia (${total}/${s.maxQueue})`;
+    if (total >= s.maxQueue) return { status: `fila cheia (${total}/${s.maxQueue})`, queue };
 
     const plan = parseQueue(s.queue || DEFAULT_QUEUE);
     for (const step of plan) {
@@ -2587,20 +2509,32 @@
       }
       const tb = buildings[target];
       if (tb && tb.error && target === step.building) {
-        if (s.strictOrder) return `aguardando: ${NAMES[step.building]} nv.${step.level} (${String(tb.error).replace(/<[^>]+>/g, '')})`;
+        if (s.strictOrder) return { status: `aguardando: ${NAMES[step.building]} nv.${step.level} (${String(tb.error).replace(/<[^>]+>/g, '')})`, queue };
         continue;
       }
 
       if (s.dryRun) {
-        log.info(`(teste) construiria ${NAMES[target]} na aldeia ${vid}`);
-        return `teste: construiria ${NAMES[target]}`;
+        log.info(`(teste) construiria ${NAMES[target]} na aldeia ${vname}`);
+        return { status: `teste: construiria ${NAMES[target]}`, queue };
       }
       const res = await S.ajax('main', 'upgrade_building', { id: target, force: 1, destroy: 0, source: vid }, { type: 'main' }, vid);
-      if (!res.ok) return `recusado: ${res.reason}`;
-      log.info(`Construção iniciada: ${NAMES[target]} (aldeia ${vid})`);
-      return `${NAMES[target]} entrou na fila`;
+      if (!res.ok) return { status: `recusado: ${res.reason}`, queue };
+      log.info(`Construção iniciada: ${NAMES[target]} (aldeia ${vname})`);
+      return { status: `${NAMES[target]} entrou na fila`, queue };
     }
-    return 'fila de construção concluída';
+    return { status: 'fila de construção concluída', queue };
+  }
+
+  function renderQueueList(host, entries, showVillage) {
+    host.innerHTML = '';
+    if (!entries.length) {
+      host.appendChild(S.h('div', { class: 'tws-muted', text: 'Nada na fila agora.' }));
+      return;
+    }
+    for (const q of entries) {
+      const label = `${showVillage ? `${q.village}: ` : ''}${q.name}${q.level ? ` nv.${q.level}` : ''}${q.remaining ? ` · ${q.remaining}` : ''}`;
+      host.appendChild(S.h('div', { class: 'tws-row', text: label, title: q.etaText || '' }));
+    }
   }
 
   TW.registerModule({
@@ -2610,21 +2544,35 @@
     defaultEnabled: false,
     async run(ctx) {
       const ui = S.card(MODULE_ID, 'Construtor');
+      const queueHost = S.h('div', { class: 'tws-list' });
+      ui.body.append(S.h('div', { style: { fontWeight: 'bold', fontSize: '10px' }, text: 'Fila de construção' }), queueHost);
+      // Intervalo lido só uma vez no carregamento (o S.loop já fixa o
+      // ritmo na hora de registrar) — mudar no dashboard vale a partir
+      // do próximo carregamento da página, igual ligar/desligar o módulo.
       let allVillages = false;
-      try { allVillages = (await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS)).allVillages; } catch { /* usa padrão */ }
+      let interval = DEFAULTS.interval;
+      try {
+        const initial = await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS);
+        allVillages = initial.allVillages;
+        interval = Math.max(20000, Number(initial.interval) || DEFAULTS.interval);
+      } catch { /* usa padrão */ }
 
       S.loop(allVillages ? MODULE_ID : `${MODULE_ID}:${S.villageId()}`, async () => {
         const s = { ...DEFAULTS, ...(await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS)) };
         const villages = s.allVillages ? await S.myVillages() : [{ id: S.villageId(), name: 'aldeia atual' }];
         const results = [];
+        let allQueue = [];
         for (const v of villages) {
           if (S.botState.active) return;
-          const r = await buildOnce(v.id, s, ctx.log);
-          results.push(r);
+          const r = await buildOnce(v.id, v.name, s, ctx.log);
+          results.push(r.status);
+          allQueue = allQueue.concat(r.queue);
           if (villages.length > 1) await S.sleep(S.jitter(1500, 3500));
         }
         ui.setStatus(villages.length > 1 ? `${villages.length} aldeia(s) verificada(s)` : results[0]);
-      }, 55000, 85000);
+        renderQueueList(queueHost, allQueue, villages.length > 1);
+        await reportQueue(allQueue).catch(() => {});
+      }, interval, interval * 1.5);
     },
   });
 })();

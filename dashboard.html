@@ -308,6 +308,11 @@ kbd {
 .livetroops { display: flex; flex-wrap: wrap; gap: 6px; }
 .troop-chip { padding: 4px 9px; border-radius: 999px; background: var(--ink-3); font-size: 12px; font-family: var(--mono); }
 .troop-chip small { font-family: var(--sans); color: var(--text-3); margin-left: 3px; }
+.livesub { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--text-2); margin: 10px 0 6px; }
+.livesub .ico { color: var(--ember); }
+.livequeue { display: flex; flex-direction: column; gap: 5px; }
+.livequeue-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; padding: 5px 8px; border-radius: 8px; background: var(--ink-1); }
+.livequeue-row .mono { font-family: var(--mono); color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
 
 .testband {
   display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
@@ -751,24 +756,36 @@ const GROUPS = ['Ofensiva', 'Exército', 'Economia', 'Alertas'];
 const MODULES = [
   {
     id: 'auto-farm', name: 'Auto Farm', group: 'Ofensiva', icon: 'target', screen: 'Praça de reunião',
-    desc: 'Encontra aldeias bárbaras próximas e envia ataques com seus modelos de tropas.',
-    defaults: { maxDistance: 12, cooldownMinutes: 30, dryRun: true, templates: [], activeTemplateId: null },
+    desc: 'Ataca sozinho, sem parar: mantém ondas de ataque no ar e manda a próxima assim que uma volta.',
+    defaults: {
+      maxDistance: 12, cooldownMinutes: 30, maxConcurrentWaves: 1,
+      enableHourlyLimit: false, attacksPerHour: 20,
+      enableNightPause: false, nightPauseStart: '00:00', nightPauseEnd: '06:00',
+      dryRun: true, templates: [], activeTemplateId: null,
+    },
     templates: true,
     presets: [
-      { id: 'leve', label: 'Leve', settings: { maxDistance: 8, cooldownMinutes: 60 } },
-      { id: 'equilibrado', label: 'Equilibrado', settings: { maxDistance: 12, cooldownMinutes: 30 } },
-      { id: 'agressivo', label: 'Agressivo', settings: { maxDistance: 20, cooldownMinutes: 15 } },
+      { id: 'leve', label: 'Leve', settings: { maxDistance: 8, cooldownMinutes: 60, maxConcurrentWaves: 1 } },
+      { id: 'equilibrado', label: 'Equilibrado', settings: { maxDistance: 12, cooldownMinutes: 30, maxConcurrentWaves: 2 } },
+      { id: 'agressivo', label: 'Agressivo', settings: { maxDistance: 20, cooldownMinutes: 15, maxConcurrentWaves: 4 } },
     ],
     hint: (s) => {
       const tpl = (s.templates || []).find((t) => t.id === s.activeTemplateId);
       const tplTxt = tpl ? `modelo "${tpl.name}"` : (s.templates || []).length ? 'nenhum modelo ativo' : 'sem modelos';
-      return `${s.maxDistance} campos · a cada ${s.cooldownMinutes} min · ${tplTxt}`;
+      const waves = s.maxConcurrentWaves > 1 ? `${s.maxConcurrentWaves} ondas no ar` : '1 onda por vez';
+      return `${s.maxDistance} campos · ${waves} · ${tplTxt}`;
     },
     fields: [
       { key: 'maxDistance', type: 'range', label: 'Distância máxima', min: 1, max: 40, step: 1, unit: 'campos' },
       { key: 'cooldownMinutes', type: 'range', label: 'Espera por alvo', min: 5, max: 240, step: 5, unit: 'min' },
+      { key: 'maxConcurrentWaves', type: 'range', label: 'Ondas simultâneas', min: 1, max: 15, step: 1, unit: 'no ar' },
+      { key: 'enableHourlyLimit', type: 'switch', label: 'Limitar ataques por hora' },
+      { key: 'attacksPerHour', type: 'range', label: 'Máximo por hora (se limitado)', min: 1, max: 120, step: 1, unit: '/h' },
+      { key: 'enableNightPause', type: 'switch', label: 'Pausar de madrugada' },
+      { key: 'nightPauseStart', type: 'text', label: 'Pausa começa às (HH:MM, seu horário)', placeholder: '00:00' },
+      { key: 'nightPauseEnd', type: 'text', label: 'Pausa termina às (HH:MM, seu horário)', placeholder: '06:00' },
     ],
-    note: 'O modelo ativo abaixo é o mesmo que o script usa para enviar — mudou aqui, muda no jogo em segundos, sem precisar recarregar a página.',
+    note: 'O modelo ativo abaixo é o mesmo que o script usa para enviar — mudou aqui, muda no jogo em segundos, sem precisar recarregar a página. Sem limite de hora e sem pausa noturna, o farm ataca sem parar 24h — mais rápido, mas também mais fácil de reconhecer como automação. Considere ligar pelo menos um dos dois.',
   },
   {
     id: 'scheduler', name: 'Agendador', group: 'Ofensiva', icon: 'clock', screen: 'Praça de reunião',
@@ -853,13 +870,13 @@ const MODULES = [
   {
     id: 'mega-builder', name: 'Construção', group: 'Economia', icon: 'hammer', screen: 'Edifício principal',
     desc: 'Coloca a próxima construção disponível na fila sempre que houver espaço.',
-    defaults: { interval: 5000, dryRun: true },
+    defaults: { interval: 60000, dryRun: true },
     presets: [
-      { id: 'normal', label: 'Ritmo normal', settings: { interval: 5000 } },
-      { id: 'calmo', label: 'Ritmo calmo', settings: { interval: 30000 } },
+      { id: 'normal', label: 'Ritmo normal', settings: { interval: 60000 } },
+      { id: 'calmo', label: 'Ritmo calmo', settings: { interval: 180000 } },
     ],
-    hint: (s) => `Verifica a cada ${Math.round(s.interval / 1000)}s`,
-    fields: [{ key: 'interval', type: 'range', label: 'Intervalo', min: 2000, max: 120000, step: 1000, scale: 1000, unit: 's' }],
+    hint: (s) => `Verifica a cada ~${Math.round(s.interval / 1000)}s`,
+    fields: [{ key: 'interval', type: 'range', label: 'Intervalo (vale a partir do próximo carregamento da página)', min: 20000, max: 300000, step: 10000, scale: 1000, unit: 's' }],
   },
   {
     id: 'notif-discord', name: 'Alertas no Discord', group: 'Alertas', icon: 'bell', screen: 'Qualquer tela', noTestMode: true,
@@ -1402,33 +1419,49 @@ function statsHTML(key) {
 
 function liveHTML(key) {
   const s = state.accounts[key];
-  if (!s || !s.resources) {
-    return `<div class="livecard livecard-empty">${icon('bolt', 'sm')}<span>Status ao vivo aparece aqui assim que o script rodar uma vez nesta conta (até ~90s depois de abrir o jogo).</span></div>`;
+  if (!s || (!s.resources && !s.buildQueue)) {
+    return `<div class="livecard livecard-empty">${icon('bolt', 'sm')}<span>Status ao vivo aparece aqui assim que o script rodar uma vez nesta conta (até ~90s depois de abrir o jogo — a fila de construção só aparece com o módulo Construção ligado).</span></div>`;
   }
-  const res = s.resources;
-  const pct = (n) => res.storageMax ? Math.min(100, Math.round((n / res.storageMax) * 100)) : 0;
-  const resBar = (key2, label) => `
-    <div class="livebar">
-      <span class="livebar-label">${esc(label)}</span>
-      <div class="livebar-track"><i style="width:${pct(res[key2])}%"></i></div>
-      <span class="livebar-val">${fmt(res[key2])}</span>
-    </div>`;
-  const troops = s.troops ? Object.entries(s.troops).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]) : null;
-  const troopsHTML = troops && troops.length
-    ? troops.map(([u, n]) => `<span class="troop-chip">${fmt(n)} <small>${esc(attackUnitLabel(u))}</small></span>`).join('')
-    : '<span class="note">sem tropas em casa (ou não lido ainda)</span>';
-  const incoming = s.incomingAttacks
-    ? `<span class="tag tag-off" style="background:var(--rose-soft);color:var(--rose)">⚠ ${s.incomingAttacks} ataque${s.incomingAttacks > 1 ? 's' : ''} a caminho</span>`
-    : (s.incoming !== undefined ? '<span class="tag tag-live">sem ataques a caminho</span>' : '');
+
+  let resourcesHTML = '';
+  let troopsHTML = '';
+  let incoming = '';
+  if (s.resources) {
+    const res = s.resources;
+    const pct = (n) => res.storageMax ? Math.min(100, Math.round((n / res.storageMax) * 100)) : 0;
+    const resBar = (key2, label) => `
+      <div class="livebar">
+        <span class="livebar-label">${esc(label)}</span>
+        <div class="livebar-track"><i style="width:${pct(res[key2])}%"></i></div>
+        <span class="livebar-val">${fmt(res[key2])}</span>
+      </div>`;
+    resourcesHTML = `<div class="livebars">${resBar('wood', 'Madeira')}${resBar('stone', 'Argila')}${resBar('iron', 'Ferro')}</div>`;
+    const troops = s.troops ? Object.entries(s.troops).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]) : null;
+    troopsHTML = `<div class="livetroops">${troops && troops.length
+      ? troops.map(([u, n]) => `<span class="troop-chip">${fmt(n)} <small>${esc(attackUnitLabel(u))}</small></span>`).join('')
+      : '<span class="note">sem tropas em casa (ou não lido ainda)</span>'}</div>`;
+    incoming = s.incomingAttacks
+      ? `<span class="tag tag-off" style="background:var(--rose-soft);color:var(--rose)">⚠ ${s.incomingAttacks} ataque${s.incomingAttacks > 1 ? 's' : ''} a caminho</span>`
+      : (s.incoming !== undefined ? '<span class="tag tag-live">sem ataques a caminho</span>' : '');
+  }
+
+  let buildHTML = '';
+  if (s.buildQueue) {
+    buildHTML = `
+      <div class="livesub">${icon('hammer', 'sm')}Construindo</div>
+      <div class="livequeue">${s.buildQueue.length
+        ? s.buildQueue.map((q) => `<div class="livequeue-row"><span>${esc(q.name)}${q.level ? ` nv.${q.level}` : ''}</span><span class="mono">${esc(q.remaining || q.etaText || '')}</span></div>`).join('')
+        : '<span class="note">fila vazia agora</span>'}</div>`;
+  }
+
   return `
     <div class="livecard">
       <div class="livecard-head">
         <b>${icon('bolt', 'sm')}Ao vivo</b>
         ${incoming}
-        <span class="note" style="margin-left:auto">atualizado ${esc(ago(s.at || s.lastSeen))}</span>
+        <span class="note" style="margin-left:auto">atualizado ${esc(ago(s.at || s.buildQueueAt || s.lastSeen))}</span>
       </div>
-      <div class="livebars">${resBar('wood', 'Madeira')}${resBar('stone', 'Argila')}${resBar('iron', 'Ferro')}</div>
-      <div class="livetroops">${troopsHTML}</div>
+      ${resourcesHTML}${troopsHTML}${buildHTML}
     </div>`;
 }
 

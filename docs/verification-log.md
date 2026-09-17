@@ -92,7 +92,7 @@ Contexto: v0.6/v0.7/v1.0 tinham 6 módulos que só *fingiam* agir — procuravam
 | Agendador | `place&try=confirm` + `place&action=command` (mesmos 2 POSTs do Auto Farm, já VERIFIED) — roda em `screens: ['any']` agora, não depende mais da aba estar na tela de confirmação | Envio em si VERIFIED (reusa `submitAttack`); a *independência de tela* e o cálculo de horário de chegada (duração lida da resposta da etapa 1) — UNVERIFIED |
 | Recrutamento | `ajaxaction=train` no quartel/estábulo/oficina; `#<unidade>_0_cost_<recurso>` e `#<unidade>_0_a` pro custo/máximo | UNVERIFIED |
 | Coleta / Coleta em Massa | `var village = {...}` na página `place&mode=scavenge` (opções bloqueadas/ocupadas); `ajaxaction=send_squads` em `scavenge_api`; divisão de tropas com pesos 15/6/3/2 | UNVERIFIED |
-| Mega Construtor | `BuildingMain.buildings = {...}` (regex no HTML da tela principal); `ajaxaction=upgrade_building` | UNVERIFIED |
+| Mega Construtor | `BuildingMain.buildings = {...}` (regex no HTML da tela principal); `ajaxaction=upgrade_building` | **VERIFIED (2026-09-20)** — usuário confirmou construção entrando na fila de verdade (`Bosque Nível 7`, com contagem regressiva e horário de conclusão reais). O parser de fila exibida (`readBuildQueue`, v1.4.0 — nome/nível/tempo restante por linha da tabela `#build_queue`) ainda é **UNVERIFIED**: extrai por texto, não por seletor fixo, mas o formato exato nunca foi conferido campo a campo. |
 | Balanceador | Recursos/armazém lidos de `TribalWars.updateGameData(...)` embutido no HTML de `market&mode=send`; envio reusa o fluxo de mercado abaixo | UNVERIFIED |
 | Envio de recursos (mercado) | `market&mode=send` → formulário de confirmação → 2º POST | UNVERIFIED |
 | Status ao vivo (`live-status`, sempre ativo) | Tropas em casa: mesma leitura do Auto Farm (`#unit_input_<u>`, `data-all-count`) na Praça de Reunião. Ataques a caminho: tela `info_command&type=incomings` — **nome de tela e formato de tabela não confirmados**, pode simplesmente não achar nada (o snapshot não quebra se essa parte falhar) | UNVERIFIED |
@@ -100,6 +100,16 @@ Contexto: v0.6/v0.7/v1.0 tinham 6 módulos que só *fingiam* agir — procuravam
 **Como testar cada um com segurança**: todos nasceram com `dryRun: true` por padrão — ligam, mostram no console o que fariam, e não tocam em nada. Ative modo real um módulo por vez.
 
 **Sincronização dashboard ↔ jogo**: perfis (`twsuite:profiles`) trocam via `postMessage` entre `dashboard.html` (aberto como `file://`) e o script rodando na aba do jogo. O Auto Farm agora relê a configuração a cada ~8s enquanto a página está aberta (`window.TWSuite.applyProfileNow` + comparação de `templates`/`activeTemplateId`) — os outros módulos econômicos releem a configuração a cada ciclo próprio (25s–30min conforme o módulo), então uma mudança no dashboard vale a partir do próximo ciclo, sem precisar recarregar. Ligar/desligar um módulo continua valendo só no próximo carregamento de página (limitação conhecida, documentada no `DASHBOARD.md`).
+
+## Fase 6 — v1.4.0: Auto Farm contínuo (ondas simultâneas)
+
+Pedido do usuário: o Auto Farm exigia clique manual por ataque (mesmo em modo real, mostrava uma lista com botão "Enviar" por alvo). Reescrito pra atacar sozinho, sem parar — mantém até N ataques ("ondas") viajando ao mesmo tempo e dispara o próximo assim que uma onda volta, sem clique nenhum.
+
+O envio em si continua o mesmo mecanismo **VERIFIED** (`S.sendCommand`, os dois POSTs já validados). O que é novo nesta versão, e nunca testado ao vivo:
+
+- **Rastreio de "ondas no ar"**: ao enviar, grava `{ targetId, sentAt, returnAt }` em `auto-farm:waves:<aldeia>`, assumindo retorno em `2×durationMs` (a duração de ida, lida da resposta real da etapa 1, dobrada). Cada ciclo (a cada ~20–35s) descarta ondas cujo `returnAt` já passou e só manda uma nova se `ondas no ar < máximo configurado`. **UNVERIFIED**: nunca confirmado se `durationMs` bate exatamente com o tempo de ida+volta real (perdas de tropa, efeitos do mundo etc. podem alterar isso) — na pior hipótese o contador fica errado e o farm manda menos ataques do que podia, nunca mais.
+- **Limite por hora** e **pausa noturna**: contagem simples de envios na última hora e janela de horário (local do navegador, não do servidor) configuráveis no dashboard — lógica nunca testada em uso real.
+- Alvos em ondas atualmente "no ar" ficam excluídos da lista de próximos alvos (evita mandar duas ondas pro mesmo bárbaro ao mesmo tempo).
 
 ## Fases futuras (ainda não implementadas)
 
