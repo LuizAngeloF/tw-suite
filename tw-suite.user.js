@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.4.0
+// @version      0.4.1
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -636,7 +636,7 @@
 
   // Etapa 2: confirma o envio usando os tokens (ch/h) retornados pela
   // etapa 1 — equivalente a clicar "Enviar ataque" na tela seguinte.
-  async function submitAttackStep2(villageId, unit, amount, x, y, confirmHtml) {
+  async function submitAttackStep2(villageId, unit, amount, x, y, confirmHtml, csrf) {
     const confirmDoc = parseHtml(confirmHtml);
     const confirmForm = confirmDoc.querySelector('#troop_confirm_submit')?.closest('form') || confirmDoc.querySelector('form');
     if (!confirmForm) return { ok: false, reason: 'etapa 2: não achei o formulário de confirmação na resposta da etapa 1' };
@@ -651,6 +651,13 @@
       source_village: String(villageId),
       village: String(villageId),
     };
+    // O token "h" não vem no HTML estático (o jogo insere via JS antes
+    // de enviar de verdade — DOMParser não roda script, então nunca
+    // aparece no formulário parseado). Confirmado ao vivo (2026-09-19):
+    // é exatamente game_data.csrf. Sem ele o servidor responde 200 mas
+    // não processa nada, em vez de redirecionar (302) como num envio
+    // real bem-sucedido.
+    if (csrf) overrides.h = csrf;
     for (const u of UNIT_FIELDS) overrides[u] = u === unit ? String(amount) : '0';
 
     const params = formToParams(confirmForm, overrides);
@@ -662,10 +669,10 @@
     return { ok: true };
   }
 
-  async function submitAttack(villageId, unit, amount, x, y) {
+  async function submitAttack(villageId, unit, amount, x, y, csrf) {
     const step1 = await submitAttackStep1(villageId, unit, amount, x, y);
     if (!step1.ok) return step1;
-    return submitAttackStep2(villageId, unit, amount, x, y, step1.html);
+    return submitAttackStep2(villageId, unit, amount, x, y, step1.html, csrf);
   }
 
   function buildPanel() {
@@ -846,7 +853,8 @@
 
             btn.disabled = true;
             btn.textContent = 'Enviando...';
-            const result = await submitAttack(myVillage.id, settings.unit, amount, target.x, target.y);
+            const csrf = gameApi.getGameData()?.csrf;
+            const result = await submitAttack(myVillage.id, settings.unit, amount, target.x, target.y, csrf);
             btn.disabled = false;
             btn.textContent = 'Enviar';
 

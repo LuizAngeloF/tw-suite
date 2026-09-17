@@ -63,7 +63,11 @@ h=ffbbc10a
 
 **VERIFIED** (2026-09-19) — payload real de um envio genuíno bem-sucedido, capturado via HAR. Implementado em `submitAttackStep1`/`submitAttackStep2`/`submitAttack`: os campos são lidos ao vivo do formulário real da página (etapa 1) e da resposta HTML da etapa 1 (etapa 2, via `DOMParser`) — nunca fixos no código, pra não quebrar se os tokens/nomes mudarem. `autoConfirm` como toggle separado foi removido: como o envio agora é determinístico (POST direto, não depende de clique funcionar ou não), a única opção relevante continua sendo `dryRun`.
 
-**Ainda não testado**: o próprio fluxo `fetch()` (v0.4.0) precisa de teste ao vivo — as etapas individuais foram verificadas via HAR de uma ação manual, mas o código novo ainda não foi confirmado enviando de verdade.
+**Teste ao vivo do v0.4.0 (2026-09-19): falhou, causa identificada.** As duas requisições saíram (confirmado via HAR: ambas HTTP 200), mas a etapa 2 (`action=command`) retornou **200 em vez de 302** — comparando com um envio manual bem-sucedido feito logo em seguida (que retornou 302, redirecionamento = sucesso), a diferença era o campo **`h`** (token anti-CSRF), presente no envio manual e **ausente** no nosso payload.
+
+Causa: `submitAttackStep2` monta o corpo da requisição a partir do HTML estático devolvido pela etapa 1, parseado via `DOMParser` — que **não executa `<script>`**. O campo `h` não é um `<input>` oculto no HTML; é inserido pelo próprio JavaScript do jogo na hora do envio de verdade, então nunca aparece no HTML puro.
+
+**Corrigido em v0.4.1**: confirmado ao vivo que `h` é simplesmente `game_data.csrf` (`Object.keys(game_data)` incluía `csrf`, e o valor batia exatamente com o `h` capturado no envio manual: `ffbbc10a`). `submitAttack`/`submitAttackStep2` agora recebem esse valor como parâmetro (lido de `gameApi.getGameData().csrf` no momento do clique) e o incluem explicitamente no corpo da etapa 2. Ainda não retestado.
 
 ## Fases futuras (ainda não implementadas)
 
