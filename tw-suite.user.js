@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.3.0
+// @version      1.3.1
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -357,11 +357,22 @@
 
     function startDashboardBridge() {
       const badge = injectFileBadge();
+      // O Tampermonkey roda o userscript num sandbox isolado — o `window`
+      // enxergado aqui dentro NÃO é garantidamente o mesmo objeto que o
+      // `window` da página real (varia por navegador/config de sandbox do
+      // Tampermonkey). Comparar `ev.source !== window` pra filtrar
+      // mensagens falha nesse caso: a mensagem chega, mas é descartada
+      // silenciosamente por não bater a identidade. Usamos `unsafeWindow`
+      // (o window real da página) pros dois lados — enviar e escutar —
+      // pra garantir que ambos falem com o mesmo objeto, e confiamos só
+      // na assinatura `data.twsuite` pra filtrar (não tem iframe nesta
+      // página, então não tem risco de pegar mensagem de outra origem).
+      const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
       const reply = (id, ok, payload) =>
-        window.postMessage({ twsuite: 'bridge-res', id, ok, payload }, '*');
+        pageWindow.postMessage({ twsuite: 'bridge-res', id, ok, payload }, '*');
 
-      window.addEventListener('message', async (ev) => {
-        if (ev.source !== window || !ev.data || ev.data.twsuite !== 'bridge-req') return;
+      pageWindow.addEventListener('message', async (ev) => {
+        if (!ev.data || ev.data.twsuite !== 'bridge-req') return;
         badge.markContacted();
         const { id, op, payload } = ev.data;
         try {
@@ -385,7 +396,7 @@
           reply(id, false, { error: String(e && e.message || e) });
         }
       });
-      window.postMessage({ twsuite: 'bridge-ready' }, '*');
+      pageWindow.postMessage({ twsuite: 'bridge-ready' }, '*');
     }
 
     return { accountKeyFromGame, applyForCurrentAccount, getLastApplyResult, reportStatus, importSyncCode, startDashboardBridge };
