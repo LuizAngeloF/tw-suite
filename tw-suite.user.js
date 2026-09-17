@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.6.0
+// @version      0.7.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1049,66 +1049,79 @@
 // ============================================================
 // MÓDULO: agendador-de-comandos (Fase 2)
 //
-// Agenda envios pra um horário específico usando a tela nativa
-// de confirmação de ataque (screen=place&try=confirm). Lê a
-// duração de viagem mostrada na tela, calcula o horário de
-// envio (horário desejado − duração), e clica no botão nativo
-// no instante certo via setTimeout.
+// Fila de ataques agendados pra múltiplos horários. Sincroniza
+// com o relógio do servidor (via serverTime) pra precisão.
+// Persiste a fila no storage — sobrevive a refresh/logout.
 //
-// Detecta a tela via URL e renderiza um painel pra entrada
-// do horário. Sem recriação de POST — só automação do clique.
+// Painel mostra fila de ataques pendentes + interface pra
+// adicionar novos. Cada ataque na fila é executado no horário
+// certo via setTimeout usando serverTime.now().
+//
+// Tela de confirmação (place&try=confirm): painel permite
+// agendar um novo ataque (detecta automaticamente alvo/duração).
+// Qualquer outra tela: mostra fila global + executa ataques.
 // ============================================================
 (function registerSchedulerModule() {
   'use strict';
 
   const MODULE_ID = 'scheduler';
   const PANEL_ID = 'twsuite-scheduler-panel';
+  const STORAGE_KEY = 'scheduler:queue';
 
   function getTravelDuration() {
-    // Procura pela duração exibida na tela de confirmação.
-    // Formato esperado: "Duração: HH:MM:SS" ou similar.
-    // Retorna o tempo em milissegundos, ou null se não encontrar.
     const bodyText = document.body.innerText;
     const match = bodyText.match(/Duração:\s*(\d+):(\d+):(\d+)/i) || bodyText.match(/Duration:\s*(\d+):(\d+):(\d+)/i);
     if (match) {
       const hours = parseInt(match[1], 10);
       const minutes = parseInt(match[2], 10);
       const seconds = parseInt(match[3], 10);
-      return (hours * 3600 + minutes * 60 + seconds) * 1000; // milissegundos
+      return (hours * 3600 + minutes * 60 + seconds) * 1000;
     }
     return null;
   }
 
-  function parseTimeInput(input) {
-    // Aceita HH:MM ou HH:MM:SS
-    const match = input.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-    if (!match) return null;
-    const hours = parseInt(match[1], 10);
-    const minutes = parseInt(match[2], 10);
-    const seconds = parseInt(match[3] || '0', 10);
-    if (hours > 23 || minutes > 59 || seconds > 59) return null;
-    return hours * 3600 + minutes * 60 + seconds; // segundos do dia
+  function getTargetCoords() {
+    const params = new URLSearchParams(window.location.search);
+    const targetParam = params.get('target');
+    if (!targetParam) return null;
+    const bodyText = document.body.innerText;
+    // Procura por "X|Y" na página
+    const match = bodyText.match(/(\d+)\s*\|\s*(\d+)/);
+    if (match) {
+      return { x: parseInt(match[1], 10), y: parseInt(match[2], 10) };
+    }
+    return null;
   }
 
-  function getCurrentTimeSeconds() {
-    const now = new Date();
-    return now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  async function loadQueue(storage) {
+    const data = await storage.get(STORAGE_KEY, '[]');
+    try {
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
   }
 
-  function buildPanel(travelDurationMs, log) {
+  async function saveQueue(storage, queue) {
+    await storage.set(STORAGE_KEY, JSON.stringify(queue));
+  }
+
+  function buildMainPanel(queue, storage, log, serverTime) {
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
     Object.assign(panel.style, {
       position: 'fixed',
       top: '60px',
       left: '16px',
-      width: '300px',
+      width: '320px',
+      maxHeight: '70vh',
+      overflowY: 'auto',
       background: '#f4e4bc',
       border: '2px solid #7a5230',
       borderRadius: '6px',
       padding: '10px',
       zIndex: 99998,
-      fontSize: '12px',
+      fontSize: '11px',
       color: '#1a1a1a',
       fontFamily: 'Verdana, Arial, sans-serif',
       boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
@@ -1120,108 +1133,248 @@
     title.textContent = 'Agendador de Comandos';
     panel.appendChild(title);
 
-    const travelLabel = document.createElement('div');
-    travelLabel.style.marginBottom = '4px';
-    travelLabel.textContent = `Duração: ${Math.floor(travelDurationMs / 60000)}:${String(Math.floor((travelDurationMs % 60000) / 1000)).padStart(2, '0')}`;
-    panel.appendChild(travelLabel);
+    const queueTitle = document.createElement('div');
+    queueTitle.style.fontWeight = 'bold';
+    queueTitle.style.marginTop = '8px';
+    queueTitle.style.marginBottom = '4px';
+    queueTitle.style.fontSize = '10px';
+    queueTitle.textContent = `Fila: ${queue.length} ataques`;
+    panel.appendChild(queueTitle);
+
+    const listEl = document.createElement('div');
+    listEl.style.maxHeight = '300px';
+    listEl.style.overflowY = 'auto';
+    listEl.style.marginBottom = '8px';
+    listEl.style.borderBottom = '1px solid #7a5230';
+    listEl.style.paddingBottom = '8px';
+
+    if (queue.length === 0) {
+      listEl.textContent = '(nenhum ataque agendado)';
+    } else {
+      for (let i = 0; i < queue.length; i++) {
+        const attack = queue[i];
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        row.style.alignItems = 'center';
+        row.style.marginBottom = '3px';
+        row.style.fontSize = '10px';
+        row.style.padding = '3px';
+        row.style.background = '#e8d4a0';
+        row.style.borderRadius = '3px';
+
+        const label = document.createElement('span');
+        label.textContent = `${attack.x}|${attack.y} @ ${attack.arrivalTime}`;
+        row.appendChild(label);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = '✕';
+        removeBtn.style.fontSize = '9px';
+        removeBtn.style.padding = '0 4px';
+        removeBtn.style.width = '24px';
+        removeBtn.addEventListener('click', async () => {
+          queue.splice(i, 1);
+          await saveQueue(storage, queue);
+          panel.remove();
+          renderScheduler(queue, storage, log, serverTime);
+        });
+        row.appendChild(removeBtn);
+        listEl.appendChild(row);
+      }
+    }
+    panel.appendChild(listEl);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = 'Limpar fila';
+    clearBtn.style.fontSize = '10px';
+    clearBtn.style.width = '100%';
+    clearBtn.style.marginBottom = '4px';
+    clearBtn.addEventListener('click', async () => {
+      await saveQueue(storage, []);
+      log.info('Fila de ataques limpa.');
+      panel.remove();
+      renderScheduler([], storage, log, serverTime);
+    });
+    panel.appendChild(clearBtn);
+
+    // Status de execução
+    const statusEl = document.createElement('div');
+    statusEl.style.fontSize = '10px';
+    statusEl.style.color = '#555';
+    statusEl.style.marginTop = '4px';
+    statusEl.textContent = `Sincronizado: ${new Date(serverTime.now()).toLocaleTimeString()}`;
+    panel.appendChild(statusEl);
+
+    return panel;
+  }
+
+  function buildConfirmPanel(storage, log, serverTime) {
+    const panel = document.createElement('div');
+    panel.id = PANEL_ID;
+    Object.assign(panel.style, {
+      position: 'fixed',
+      top: '60px',
+      left: '16px',
+      width: '280px',
+      background: '#f4e4bc',
+      border: '2px solid #7a5230',
+      borderRadius: '6px',
+      padding: '10px',
+      zIndex: 99998,
+      fontSize: '11px',
+      color: '#1a1a1a',
+      fontFamily: 'Verdana, Arial, sans-serif',
+      boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+    });
+
+    const title = document.createElement('div');
+    title.style.fontWeight = 'bold';
+    title.style.marginBottom = '6px';
+    title.textContent = 'Agendar Novo Ataque';
+    panel.appendChild(title);
+
+    const travelDurationMs = getTravelDuration();
+    const targetCoords = getTargetCoords();
+
+    if (!travelDurationMs || !targetCoords) {
+      panel.textContent = 'Erro: duração ou alvo não detectados.';
+      return panel;
+    }
+
+    const durationMin = Math.floor(travelDurationMs / 60000);
+    const durationSec = Math.floor((travelDurationMs % 60000) / 1000);
+
+    const infoLabel = document.createElement('div');
+    infoLabel.style.marginBottom = '4px';
+    infoLabel.style.fontSize = '10px';
+    infoLabel.innerHTML = `<strong>Alvo:</strong> ${targetCoords.x}|${targetCoords.y}<br/><strong>Duração:</strong> ${durationMin}:${String(durationSec).padStart(2, '0')}`;
+    panel.appendChild(infoLabel);
 
     const timeInput = document.createElement('input');
     timeInput.type = 'time';
     timeInput.style.width = '100%';
     timeInput.style.marginBottom = '4px';
     timeInput.style.boxSizing = 'border-box';
-    timeInput.title = 'Horário desejado de chegada (HH:MM)';
+    timeInput.title = 'Horário desejado de chegada';
     panel.appendChild(timeInput);
 
-    const status = document.createElement('div');
-    status.style.marginBottom = '4px';
-    status.style.fontSize = '11px';
-    status.style.color = '#555';
-    status.textContent = 'Aguardando configuração...';
-    panel.appendChild(status);
-
-    const scheduleBtn = document.createElement('button');
-    scheduleBtn.textContent = 'Agendar';
-    scheduleBtn.style.fontSize = '11px';
-    scheduleBtn.style.marginRight = '4px';
-    scheduleBtn.addEventListener('click', () => {
+    const addBtn = document.createElement('button');
+    addBtn.textContent = 'Adicionar à fila';
+    addBtn.style.fontSize = '10px';
+    addBtn.style.width = '100%';
+    addBtn.addEventListener('click', async () => {
       const timeStr = timeInput.value;
       if (!timeStr) {
         log.warn('Nenhuma hora selecionada.');
         return;
       }
+
       const [hours, minutes] = timeStr.split(':');
-      const targetSeconds = parseInt(hours, 10) * 3600 + parseInt(minutes, 10) * 60;
-      const nowSeconds = getCurrentTimeSeconds();
-      const travelSeconds = Math.floor(travelDurationMs / 1000);
-      const sendSeconds = targetSeconds - travelSeconds;
-
-      if (sendSeconds < 0) {
-        log.warn('Horário de envio já passou.');
-        return;
-      }
-
-      const delayMs = (sendSeconds - nowSeconds) * 1000;
-      const delayMinutes = Math.floor(delayMs / 60000);
-      const delaySecs = Math.floor((delayMs % 60000) / 1000);
-
-      status.textContent = `Agendado: enviará em ${delayMinutes}:${String(delaySecs).padStart(2, '0')}`;
-      scheduleBtn.disabled = true;
-      timeInput.disabled = true;
-
-      const confirmBtn = document.querySelector('#troop_confirm_submit');
-      if (!confirmBtn) {
-        log.warn('Botão de confirmação não encontrado na página.');
-        status.textContent = 'ERRO: botão não encontrado.';
-        return;
-      }
-
-      setTimeout(() => {
-        log.info(`Auto-enviando (agendador): ${hours}:${minutes}`);
-        confirmBtn.click();
-      }, delayMs);
+      const queue = await loadQueue(storage);
+      queue.push({
+        x: targetCoords.x,
+        y: targetCoords.y,
+        arrivalTime: timeStr,
+        travelDurationMs,
+        createdAt: new Date().toISOString(),
+      });
+      await saveQueue(storage, queue);
+      log.info(`Ataque agendado: ${targetCoords.x}|${targetCoords.y} @ ${timeStr}`);
+      addBtn.disabled = true;
+      addBtn.textContent = 'Adicionado!';
     });
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.textContent = 'Cancelar';
-    cancelBtn.style.fontSize = '11px';
-    cancelBtn.addEventListener('click', () => {
-      panel.remove();
-    });
-
-    panel.appendChild(scheduleBtn);
-    panel.appendChild(cancelBtn);
+    panel.appendChild(addBtn);
 
     return panel;
+  }
+
+  async function executeScheduledAttacks(queue, storage, log, serverTime) {
+    // Remove ataques já passados e dispara os que chegaram no horário
+    const now = serverTime.now();
+    const toExecute = [];
+    const remaining = [];
+
+    for (const attack of queue) {
+      const [hours, minutes] = attack.arrivalTime.split(':');
+      const targetSeconds = parseInt(hours, 10) * 3600 + parseInt(minutes, 10) * 60;
+      const travelSeconds = Math.floor(attack.travelDurationMs / 1000);
+      const sendSeconds = targetSeconds - travelSeconds;
+
+      // Converter segundos do dia pra timestamp (hoje)
+      const todayMs = new Date().getTime();
+      const today = new Date(todayMs);
+      today.setHours(0, 0, 0, 0);
+      const sendTimeMs = today.getTime() + sendSeconds * 1000;
+
+      if (sendTimeMs <= now) {
+        toExecute.push(attack);
+      } else {
+        remaining.push(attack);
+      }
+    }
+
+    // Salvar fila atualizada
+    await saveQueue(storage, remaining);
+
+    // Executar ataques (click no botão)
+    for (const attack of toExecute) {
+      const confirmBtn = document.querySelector('#troop_confirm_submit');
+      if (confirmBtn) {
+        log.info(`Auto-enviando agendado: ${attack.x}|${attack.y}`);
+        confirmBtn.click();
+      } else {
+        log.warn(`Não consegui clicar no botão pra ${attack.x}|${attack.y} — talvez não esteja na tela de confirmação.`);
+      }
+    }
+  }
+
+  async function renderScheduler(queue, storage, log, serverTime) {
+    const params = new URLSearchParams(window.location.search);
+    const isTryConfirm = params.get('try') === 'confirm';
+
+    let panel;
+    if (isTryConfirm) {
+      panel = buildConfirmPanel(storage, log, serverTime);
+    } else {
+      panel = buildMainPanel(queue, storage, log, serverTime);
+    }
+
+    document.body.appendChild(panel);
   }
 
   window.TWSuite.registerModule({
     id: MODULE_ID,
     name: 'Agendador de Comandos',
-    screens: ['place'], // Roda na tela place, vamos detectar try=confirm no run()
+    screens: ['place'],
     defaultEnabled: false,
 
     async run(ctx) {
-      const { gameApi, log } = ctx;
-      const gd = gameApi.getGameData();
+      const { storage, log, serverTime } = ctx;
 
-      // Detectar tela de confirmação (place com try=confirm na URL)
+      // Carregar fila
+      const queue = await loadQueue(storage);
+
+      // Renderizar painel (confirmação ou global)
+      await renderScheduler(queue, storage, log, serverTime);
+
+      // Executar ataques que chegaram no horário (se não estiver na tela de confirmação)
       const params = new URLSearchParams(window.location.search);
       const isTryConfirm = params.get('try') === 'confirm';
-      if (!isTryConfirm) return;
-
-      // Verificar se painel já existe (evitar duplicação se rodar de novo)
-      if (document.getElementById(PANEL_ID)) return;
-
-      const travelDurationMs = getTravelDuration();
-      if (!travelDurationMs) {
-        log.warn('Não consegui ler a duração de viagem na página.');
-        return;
+      if (!isTryConfirm && queue.length > 0) {
+        await executeScheduledAttacks(queue, storage, log, serverTime);
       }
 
-      const panel = buildPanel(travelDurationMs, log);
-      document.body.appendChild(panel);
-      log.info('Agendador de Comandos carregado. Digite o horário desejado e clique "Agendar".');
+      // Polling contínuo pra executar ataques na hora (a cada 500ms)
+      if (!isTryConfirm) {
+        const pollInterval = setInterval(async () => {
+          const updatedQueue = await loadQueue(storage);
+          if (updatedQueue.length > 0) {
+            await executeScheduledAttacks(updatedQueue, storage, log, serverTime);
+          }
+        }, 500);
+      }
+
+      log.info('Agendador de Comandos carregado.');
     },
   });
 })();
