@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.5.0
+// @version      0.6.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1042,6 +1042,186 @@
       }
 
       await renderAll();
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: agendador-de-comandos (Fase 2)
+//
+// Agenda envios pra um horário específico usando a tela nativa
+// de confirmação de ataque (screen=place&try=confirm). Lê a
+// duração de viagem mostrada na tela, calcula o horário de
+// envio (horário desejado − duração), e clica no botão nativo
+// no instante certo via setTimeout.
+//
+// Detecta a tela via URL e renderiza um painel pra entrada
+// do horário. Sem recriação de POST — só automação do clique.
+// ============================================================
+(function registerSchedulerModule() {
+  'use strict';
+
+  const MODULE_ID = 'scheduler';
+  const PANEL_ID = 'twsuite-scheduler-panel';
+
+  function getTravelDuration() {
+    // Procura pela duração exibida na tela de confirmação.
+    // Formato esperado: "Duração: HH:MM:SS" ou similar.
+    // Retorna o tempo em milissegundos, ou null se não encontrar.
+    const bodyText = document.body.innerText;
+    const match = bodyText.match(/Duração:\s*(\d+):(\d+):(\d+)/i) || bodyText.match(/Duration:\s*(\d+):(\d+):(\d+)/i);
+    if (match) {
+      const hours = parseInt(match[1], 10);
+      const minutes = parseInt(match[2], 10);
+      const seconds = parseInt(match[3], 10);
+      return (hours * 3600 + minutes * 60 + seconds) * 1000; // milissegundos
+    }
+    return null;
+  }
+
+  function parseTimeInput(input) {
+    // Aceita HH:MM ou HH:MM:SS
+    const match = input.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (!match) return null;
+    const hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const seconds = parseInt(match[3] || '0', 10);
+    if (hours > 23 || minutes > 59 || seconds > 59) return null;
+    return hours * 3600 + minutes * 60 + seconds; // segundos do dia
+  }
+
+  function getCurrentTimeSeconds() {
+    const now = new Date();
+    return now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  }
+
+  function buildPanel(travelDurationMs, log) {
+    const panel = document.createElement('div');
+    panel.id = PANEL_ID;
+    Object.assign(panel.style, {
+      position: 'fixed',
+      top: '60px',
+      left: '16px',
+      width: '300px',
+      background: '#f4e4bc',
+      border: '2px solid #7a5230',
+      borderRadius: '6px',
+      padding: '10px',
+      zIndex: 99998,
+      fontSize: '12px',
+      color: '#1a1a1a',
+      fontFamily: 'Verdana, Arial, sans-serif',
+      boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+    });
+
+    const title = document.createElement('div');
+    title.style.fontWeight = 'bold';
+    title.style.marginBottom = '6px';
+    title.textContent = 'Agendador de Comandos';
+    panel.appendChild(title);
+
+    const travelLabel = document.createElement('div');
+    travelLabel.style.marginBottom = '4px';
+    travelLabel.textContent = `Duração: ${Math.floor(travelDurationMs / 60000)}:${String(Math.floor((travelDurationMs % 60000) / 1000)).padStart(2, '0')}`;
+    panel.appendChild(travelLabel);
+
+    const timeInput = document.createElement('input');
+    timeInput.type = 'time';
+    timeInput.style.width = '100%';
+    timeInput.style.marginBottom = '4px';
+    timeInput.style.boxSizing = 'border-box';
+    timeInput.title = 'Horário desejado de chegada (HH:MM)';
+    panel.appendChild(timeInput);
+
+    const status = document.createElement('div');
+    status.style.marginBottom = '4px';
+    status.style.fontSize = '11px';
+    status.style.color = '#555';
+    status.textContent = 'Aguardando configuração...';
+    panel.appendChild(status);
+
+    const scheduleBtn = document.createElement('button');
+    scheduleBtn.textContent = 'Agendar';
+    scheduleBtn.style.fontSize = '11px';
+    scheduleBtn.style.marginRight = '4px';
+    scheduleBtn.addEventListener('click', () => {
+      const timeStr = timeInput.value;
+      if (!timeStr) {
+        log.warn('Nenhuma hora selecionada.');
+        return;
+      }
+      const [hours, minutes] = timeStr.split(':');
+      const targetSeconds = parseInt(hours, 10) * 3600 + parseInt(minutes, 10) * 60;
+      const nowSeconds = getCurrentTimeSeconds();
+      const travelSeconds = Math.floor(travelDurationMs / 1000);
+      const sendSeconds = targetSeconds - travelSeconds;
+
+      if (sendSeconds < 0) {
+        log.warn('Horário de envio já passou.');
+        return;
+      }
+
+      const delayMs = (sendSeconds - nowSeconds) * 1000;
+      const delayMinutes = Math.floor(delayMs / 60000);
+      const delaySecs = Math.floor((delayMs % 60000) / 1000);
+
+      status.textContent = `Agendado: enviará em ${delayMinutes}:${String(delaySecs).padStart(2, '0')}`;
+      scheduleBtn.disabled = true;
+      timeInput.disabled = true;
+
+      const confirmBtn = document.querySelector('#troop_confirm_submit');
+      if (!confirmBtn) {
+        log.warn('Botão de confirmação não encontrado na página.');
+        status.textContent = 'ERRO: botão não encontrado.';
+        return;
+      }
+
+      setTimeout(() => {
+        log.info(`Auto-enviando (agendador): ${hours}:${minutes}`);
+        confirmBtn.click();
+      }, delayMs);
+    });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancelar';
+    cancelBtn.style.fontSize = '11px';
+    cancelBtn.addEventListener('click', () => {
+      panel.remove();
+    });
+
+    panel.appendChild(scheduleBtn);
+    panel.appendChild(cancelBtn);
+
+    return panel;
+  }
+
+  window.TWSuite.registerModule({
+    id: MODULE_ID,
+    name: 'Agendador de Comandos',
+    screens: ['place'], // Roda na tela place, vamos detectar try=confirm no run()
+    defaultEnabled: false,
+
+    async run(ctx) {
+      const { gameApi, log } = ctx;
+      const gd = gameApi.getGameData();
+
+      // Detectar tela de confirmação (place com try=confirm na URL)
+      const params = new URLSearchParams(window.location.search);
+      const isTryConfirm = params.get('try') === 'confirm';
+      if (!isTryConfirm) return;
+
+      // Verificar se painel já existe (evitar duplicação se rodar de novo)
+      if (document.getElementById(PANEL_ID)) return;
+
+      const travelDurationMs = getTravelDuration();
+      if (!travelDurationMs) {
+        log.warn('Não consegui ler a duração de viagem na página.');
+        return;
+      }
+
+      const panel = buildPanel(travelDurationMs, log);
+      document.body.appendChild(panel);
+      log.info('Agendador de Comandos carregado. Digite o horário desejado e clique "Agendar".');
     },
   });
 })();
