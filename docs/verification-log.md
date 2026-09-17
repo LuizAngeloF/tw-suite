@@ -71,6 +71,14 @@ Causa: `submitAttackStep2` monta o corpo da requisição a partir do HTML estát
 
 **RETESTADO E FUNCIONANDO (2026-09-19, v0.4.1).** Envio real confirmado pelo usuário — ataque saiu de verdade, sem clicar em nada na UI do jogo. **Fase 1 (Auto Farm) considerada 100% concluída e verificada ponta a ponta**: descoberta de alvo via `/map/village.txt` → montagem e envio da etapa 1 (`try=confirm`) → extração de `game_data.csrf` → envio da etapa 2 (`action=command`) → ataque despachado de verdade, tudo via `fetch()`, sem depender de nenhum clique simulado.
 
+### v0.5.0 — Modelos de tropas (múltiplas unidades por envio)
+
+Pedido do usuário: em vez de escolher 1 tropa + 1 quantidade, poder montar modelos nomeados com quantidade por tropa (todas as 12), igual à tela nativa "Modelos de tropas" do jogo (`screen=place&mode=units`, referência visual mandada pelo usuário).
+
+`submitAttackStep1`/`submitAttackStep2`/`submitAttack` já eram genéricos o bastante (iteram `UNIT_FIELDS` e leem de um objeto) — só trocou a assinatura de `(unit, amount)` pra `(units)`, um objeto `{spear: N, sword: N, ...}`. Não precisou mexer no mecanismo de envio em si (mesmos dois POSTs, mesmo token `h`), só na camada de UI/dados acima.
+
+Não depende de seletor novo do jogo — os modelos são uma estrutura nossa (`settings.templates`), sem relação com os "Modelos de tropas" nativos do jogo (que são uma feature separada, limitada a 2 sem premium). Portanto **não há nada pra verificar ao vivo nessa mudança além do fluxo de UI em si** (criar/editar/excluir/selecionar modelo) — o envio real usa o mesmo caminho já verificado em v0.4.1.
+
 ## Fases futuras (ainda não implementadas)
 
 - Fase 2 (Agendador): a duração de viagem e hora de chegada já vêm na resposta da etapa 1 (`submitAttackStep1`) — dá pra extrair de lá em vez de precisar de um seletor novo. O agendador provavelmente também deve usar `fetch()` direto (`submitAttack`) na hora certa, em vez de tentar clicar em algo.

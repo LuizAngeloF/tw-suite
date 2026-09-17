@@ -14,6 +14,7 @@ Não é afiliado à InnoGames. Automatizar o jogo viola as regras oficiais do Tr
   - Não depende de simular clique em nada — os tokens/campos são lidos ao vivo do formulário e da resposta do jogo a cada envio, não fixos no código.
   - **Testado ao vivo e confirmado (v0.4.1): envio real funcionando ponta a ponta.** Ver [`docs/verification-log.md`](docs/verification-log.md) pro histórico completo (inclusive o que foi tentado e não funcionou, útil se algo quebrar no futuro).
   - Um alvo só sai da lista depois de um envio realmente confirmado. Botão **"Restaurar alvos"** no painel limpa o cooldown da aldeia atual, trazendo de volta qualquer alvo já tentado.
+  - **Modelos de tropas (v0.5.0)**: em vez de escolher 1 tropa + quantidade, agora dá pra criar modelos nomeados com quantidade por tropa (as 12 do jogo — Lanceiro, Espadachim, Bárbaro, Arqueiro, Explorador, Cavalaria leve, Arqueiro a cavalo, Cavalaria pesada, Aríete, Catapulta, Paladino, Nobre), no estilo da tela "Modelos de tropas" do próprio jogo. Crie/edite/exclua modelos direto no painel ("+Novo"/"Editar"/"Excluir"), escolha qual fica ativo no seletor — esse é o modelo usado nos envios. Se faltar tropa de algum tipo no modelo na hora do envio, manda só o que tiver disponível daquele tipo (avisa no console).
 
 Módulos planejados, em ordem: ~~Auto Farm~~ → Agendador de Comandos → Construção Automática → Notificações (Discord/WhatsApp).
 

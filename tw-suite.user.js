@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.4.1
+// @version      0.5.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -508,20 +508,32 @@
   const VILLAGE_CACHE_KEY = 'auto-farm:villageIndexCache';
   const VILLAGE_CACHE_TTL_MS = 3 * 60 * 60 * 1000; // village.txt tem ~3MB; evita rebaixar toda hora
 
-  const UNIT_OPTIONS = [
-    { value: 'light', label: 'Cavalaria leve' },
-    { value: 'spear', label: 'Lanceiro' },
-    { value: 'sword', label: 'Espadachim' },
-    { value: 'archer', label: 'Arqueiro' },
-  ];
+  const UNIT_LABELS = {
+    spear: 'Lanceiro',
+    sword: 'Espadachim',
+    axe: 'Bárbaro',
+    archer: 'Arqueiro',
+    spy: 'Explorador',
+    light: 'Cavalaria leve',
+    marcher: 'Arqueiro a cavalo',
+    heavy: 'Cavalaria pesada',
+    ram: 'Aríete',
+    catapult: 'Catapulta',
+    knight: 'Paladino',
+    snob: 'Nobre',
+  };
 
   const DEFAULT_SETTINGS = {
-    unit: 'light',
-    amount: 5,
+    templates: [], // { id, name, units: { spear: 10, sword: 10, ... } }
+    activeTemplateId: null,
     maxDistance: 12,
     cooldownMinutes: 30,
     dryRun: true,
   };
+
+  function makeTemplateId() {
+    return 'tpl_' + Math.random().toString(36).slice(2, 10);
+  }
 
   function dist(ax, ay, bx, by) {
     return Math.hypot(ax - bx, ay - by);
@@ -618,12 +630,12 @@
   // Etapa 1: envia a aldeia/coordenada/tropas — equivalente a
   // preencher o formulário da Praça de Reunião e clicar "Ataque".
   // Retorna o HTML da tela de confirmação (ou erro).
-  async function submitAttackStep1(villageId, unit, amount, x, y) {
+  async function submitAttackStep1(villageId, units, x, y) {
     const formEl = document.querySelector('#inputx')?.form || document.querySelector('#inputx')?.closest('form');
     if (!formEl) return { ok: false, reason: 'formulário da Praça de Reunião não encontrado nesta página' };
 
     const overrides = { x: String(x), y: String(y), target_type: 'coord', attack: 'Ataque' };
-    for (const u of UNIT_FIELDS) overrides[u] = u === unit ? String(amount) : '';
+    for (const u of UNIT_FIELDS) overrides[u] = units[u] > 0 ? String(units[u]) : '';
 
     const params = formToParams(formEl, overrides);
     const url = `game.php?village=${villageId}&screen=place&try=confirm`;
@@ -636,7 +648,7 @@
 
   // Etapa 2: confirma o envio usando os tokens (ch/h) retornados pela
   // etapa 1 — equivalente a clicar "Enviar ataque" na tela seguinte.
-  async function submitAttackStep2(villageId, unit, amount, x, y, confirmHtml, csrf) {
+  async function submitAttackStep2(villageId, units, x, y, confirmHtml, csrf) {
     const confirmDoc = parseHtml(confirmHtml);
     const confirmForm = confirmDoc.querySelector('#troop_confirm_submit')?.closest('form') || confirmDoc.querySelector('form');
     if (!confirmForm) return { ok: false, reason: 'etapa 2: não achei o formulário de confirmação na resposta da etapa 1' };
@@ -658,7 +670,7 @@
     // não processa nada, em vez de redirecionar (302) como num envio
     // real bem-sucedido.
     if (csrf) overrides.h = csrf;
-    for (const u of UNIT_FIELDS) overrides[u] = u === unit ? String(amount) : '0';
+    for (const u of UNIT_FIELDS) overrides[u] = String(units[u] || 0);
 
     const params = formToParams(confirmForm, overrides);
     const url = `game.php?village=${villageId}&screen=place&action=command`;
@@ -669,10 +681,10 @@
     return { ok: true };
   }
 
-  async function submitAttack(villageId, unit, amount, x, y, csrf) {
-    const step1 = await submitAttackStep1(villageId, unit, amount, x, y);
+  async function submitAttack(villageId, units, x, y, csrf) {
+    const step1 = await submitAttackStep1(villageId, units, x, y);
     if (!step1.ok) return step1;
-    return submitAttackStep2(villageId, unit, amount, x, y, step1.html, csrf);
+    return submitAttackStep2(villageId, units, x, y, step1.html, csrf);
   }
 
   function buildPanel() {
@@ -699,31 +711,163 @@
     return el;
   }
 
-  function renderSettingsForm(container, settings, onChange) {
+  // Grade compacta com um campo numérico por tropa (as 12 do jogo),
+  // no estilo da própria tela "Modelos de tropas" do jogo.
+  function createUnitGrid(initialValues) {
+    const grid = document.createElement('div');
+    Object.assign(grid.style, {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '2px 8px',
+      margin: '4px 0',
+    });
+    const inputs = {};
+    for (const u of UNIT_FIELDS) {
+      const label = document.createElement('label');
+      Object.assign(label.style, { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' });
+      const span = document.createElement('span');
+      span.textContent = UNIT_LABELS[u];
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '0';
+      input.value = String((initialValues && initialValues[u]) || 0);
+      input.style.width = '44px';
+      inputs[u] = input;
+      label.appendChild(span);
+      label.appendChild(input);
+      grid.appendChild(label);
+    }
+    return {
+      el: grid,
+      getValues() {
+        const out = {};
+        for (const u of UNIT_FIELDS) out[u] = Math.max(0, Number(inputs[u].value) || 0);
+        return out;
+      },
+    };
+  }
+
+  // Seletor de modelo ativo + criar/editar/excluir modelos nomeados
+  // (nome + quantidade por tropa), salvos nas configurações do módulo.
+  function renderTemplateManager(container, settings, onSettingsChange) {
     const wrap = document.createElement('div');
     wrap.style.marginBottom = '8px';
     wrap.style.borderBottom = '1px solid #7a5230';
     wrap.style.paddingBottom = '8px';
 
-    const unitSelect = document.createElement('select');
-    for (const opt of UNIT_OPTIONS) {
-      const o = document.createElement('option');
-      o.value = opt.value;
-      o.textContent = opt.label;
-      if (opt.value === settings.unit) o.selected = true;
-      unitSelect.appendChild(o);
-    }
-    unitSelect.addEventListener('change', () => onChange({ unit: unitSelect.value }));
+    const label = document.createElement('div');
+    label.style.fontWeight = 'bold';
+    label.style.marginBottom = '3px';
+    label.textContent = 'Modelo de tropas';
+    wrap.appendChild(label);
 
-    const amountInput = document.createElement('input');
-    amountInput.type = 'number';
-    amountInput.min = '1';
-    amountInput.value = String(settings.amount);
-    amountInput.style.width = '50px';
-    amountInput.title = 'Quantidade a enviar por alvo';
-    amountInput.addEventListener('change', () =>
-      onChange({ amount: Math.max(1, Number(amountInput.value) || 1) })
-    );
+    const row = document.createElement('div');
+    Object.assign(row.style, { display: 'flex', gap: '4px', alignItems: 'center' });
+
+    const select = document.createElement('select');
+    select.style.flex = '1';
+    select.style.minWidth = '0';
+    const placeholderOpt = document.createElement('option');
+    placeholderOpt.value = '';
+    placeholderOpt.textContent = settings.templates.length ? '— selecione —' : 'Nenhum modelo ainda';
+    select.appendChild(placeholderOpt);
+    for (const tpl of settings.templates) {
+      const o = document.createElement('option');
+      o.value = tpl.id;
+      o.textContent = tpl.name;
+      if (tpl.id === settings.activeTemplateId) o.selected = true;
+      select.appendChild(o);
+    }
+    select.addEventListener('change', () => onSettingsChange({ activeTemplateId: select.value || null }));
+
+    const newBtn = document.createElement('button');
+    newBtn.textContent = '+Novo';
+    newBtn.style.fontSize = '11px';
+
+    const editBtn = document.createElement('button');
+    editBtn.textContent = 'Editar';
+    editBtn.style.fontSize = '11px';
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = 'Excluir';
+    delBtn.style.fontSize = '11px';
+
+    row.appendChild(select);
+    row.appendChild(newBtn);
+    row.appendChild(editBtn);
+    row.appendChild(delBtn);
+    wrap.appendChild(row);
+
+    const editorHost = document.createElement('div');
+    wrap.appendChild(editorHost);
+
+    function openEditor(existingTpl) {
+      editorHost.innerHTML = '';
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.placeholder = 'Nome do modelo (ex.: Padrão 1)';
+      nameInput.value = existingTpl ? existingTpl.name : '';
+      nameInput.style.width = '100%';
+      nameInput.style.marginTop = '4px';
+      nameInput.style.boxSizing = 'border-box';
+
+      const grid = createUnitGrid(existingTpl ? existingTpl.units : null);
+
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = existingTpl ? 'Salvar alterações' : 'Criar modelo';
+      saveBtn.style.fontSize = '11px';
+      saveBtn.style.marginTop = '4px';
+      saveBtn.addEventListener('click', () => {
+        const name = nameInput.value.trim() || 'Sem nome';
+        const units = grid.getValues();
+        let templates = settings.templates.slice();
+        let activeTemplateId = settings.activeTemplateId;
+        if (existingTpl) {
+          templates = templates.map((t) => (t.id === existingTpl.id ? { ...t, name, units } : t));
+        } else {
+          const id = makeTemplateId();
+          templates.push({ id, name, units });
+          activeTemplateId = id;
+        }
+        onSettingsChange({ templates, activeTemplateId });
+      });
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'Cancelar';
+      cancelBtn.style.fontSize = '11px';
+      cancelBtn.style.marginTop = '4px';
+      cancelBtn.addEventListener('click', () => {
+        editorHost.innerHTML = '';
+      });
+
+      editorHost.appendChild(nameInput);
+      editorHost.appendChild(grid.el);
+      editorHost.appendChild(saveBtn);
+      editorHost.appendChild(cancelBtn);
+    }
+
+    newBtn.addEventListener('click', () => openEditor(null));
+    editBtn.addEventListener('click', () => {
+      const tpl = settings.templates.find((t) => t.id === select.value);
+      if (tpl) openEditor(tpl);
+    });
+    delBtn.addEventListener('click', () => {
+      const tpl = settings.templates.find((t) => t.id === select.value);
+      if (!tpl) return;
+      if (!confirm(`Excluir o modelo "${tpl.name}"?`)) return;
+      const templates = settings.templates.filter((t) => t.id !== tpl.id);
+      const activeTemplateId = settings.activeTemplateId === tpl.id ? null : settings.activeTemplateId;
+      onSettingsChange({ templates, activeTemplateId });
+    });
+
+    container.appendChild(wrap);
+  }
+
+  function renderMiscSettings(container, settings, onChange) {
+    const wrap = document.createElement('div');
+    wrap.style.marginBottom = '8px';
+    wrap.style.borderBottom = '1px solid #7a5230';
+    wrap.style.paddingBottom = '8px';
 
     const distInput = document.createElement('input');
     distInput.type = 'number';
@@ -745,13 +889,9 @@
     dryRunLabel.appendChild(dryRunCb);
     dryRunLabel.appendChild(document.createTextNode(' Modo teste (não envia de verdade)'));
 
-    wrap.appendChild(document.createTextNode('Tropa: '));
-    wrap.appendChild(unitSelect);
-    wrap.appendChild(document.createElement('br'));
-    wrap.appendChild(document.createTextNode('Qtd: '));
-    wrap.appendChild(amountInput);
-    wrap.appendChild(document.createTextNode('  Alcance: '));
+    wrap.appendChild(document.createTextNode('Alcance: '));
     wrap.appendChild(distInput);
+    wrap.appendChild(document.createTextNode(' campos'));
     wrap.appendChild(dryRunLabel);
 
     container.appendChild(wrap);
@@ -776,39 +916,105 @@
 
       let panel = document.getElementById(PANEL_ID);
       if (!panel) panel = buildPanel();
-      panel.innerHTML = '';
 
-      const title = document.createElement('div');
-      title.style.fontWeight = 'bold';
-      title.style.marginBottom = '6px';
-      title.textContent = 'Auto Farm';
-      panel.appendChild(title);
-
-      renderSettingsForm(panel, settings, async (patch) => {
+      async function persist(patch) {
         settings = { ...settings, ...patch };
         await storage.setModuleSettings(MODULE_ID, settings);
-        log.info('Configurações do Auto Farm atualizadas:', settings);
-      });
+        renderAll();
+      }
 
-      const resetBtn = document.createElement('button');
-      resetBtn.textContent = 'Restaurar alvos';
-      resetBtn.style.fontSize = '11px';
-      resetBtn.style.marginBottom = '6px';
-      resetBtn.title = 'Limpa o cooldown desta aldeia — alvos já tentados voltam a aparecer';
-      resetBtn.addEventListener('click', async () => {
-        const removed = await storage.removeByPrefix(`auto-farm:lastSent:${myVillage.id}:`);
-        log.info(`${removed} alvo(s) restaurado(s).`);
-        await refreshList();
-      });
-      panel.appendChild(resetBtn);
+      function activeTemplate() {
+        return settings.templates.find((t) => t.id === settings.activeTemplateId) || null;
+      }
 
-      const listEl = document.createElement('div');
-      panel.appendChild(listEl);
+      async function sendToTarget(target, row, btn) {
+        const tpl = activeTemplate();
+        if (!tpl) {
+          log.warn('Nenhum modelo de tropas selecionado — crie um em "Modelo de tropas" antes de enviar.');
+          return;
+        }
 
-      async function refreshList() {
-        listEl.innerHTML = 'Buscando aldeias bárbaras próximas...';
+        const sendUnits = {};
+        let anyAvailable = false;
+        let anyCapped = false;
+        for (const u of UNIT_FIELDS) {
+          const requested = tpl.units[u] || 0;
+          if (requested <= 0) {
+            sendUnits[u] = 0;
+            continue;
+          }
+          const unitInput = document.querySelector('#unit_input_' + u);
+          const available = unitInput ? Number(unitInput.dataset.allCount || 0) : 0;
+          const send = Math.min(requested, available);
+          sendUnits[u] = send;
+          if (send > 0) anyAvailable = true;
+          if (send < requested) anyCapped = true;
+        }
+
+        const describe = () =>
+          UNIT_FIELDS.filter((u) => sendUnits[u] > 0)
+            .map((u) => `${sendUnits[u]} ${UNIT_LABELS[u]}`)
+            .join(', ') || '(nada disponível)';
+
+        if (settings.dryRun) {
+          log.info(`(modo teste) modelo "${tpl.name}" enviaria [${describe()}] para ${target.x}|${target.y}${anyCapped ? ' (algumas tropas limitadas ao disponível)' : ''}`);
+          return;
+        }
+
+        if (!anyAvailable) {
+          log.warn(`Nenhuma tropa do modelo "${tpl.name}" disponível nesta aldeia agora — não enviado.`);
+          return;
+        }
+        if (anyCapped) {
+          log.warn(`Modelo "${tpl.name}" parcialmente disponível — enviando [${describe()}] em vez do modelo completo.`);
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Enviando...';
+        const csrf = gameApi.getGameData()?.csrf;
+        const result = await submitAttack(myVillage.id, sendUnits, target.x, target.y, csrf);
+        btn.disabled = false;
+        btn.textContent = 'Enviar';
+
+        if (!result.ok) {
+          log.error('Falha ao enviar:', result.reason, '— alvo continua na lista.');
+          return;
+        }
+
+        log.info(`Enviado: [${describe()}] -> ${target.x}|${target.y}.`);
+        await storage.set(cooldownKey(myVillage.id, target.id), Date.now());
+        row.remove();
+      }
+
+      async function renderAll() {
+        panel.innerHTML = '';
+
+        const title = document.createElement('div');
+        title.style.fontWeight = 'bold';
+        title.style.marginBottom = '6px';
+        title.textContent = 'Auto Farm';
+        panel.appendChild(title);
+
+        renderTemplateManager(panel, settings, persist);
+        renderMiscSettings(panel, settings, persist);
+
+        const resetBtn = document.createElement('button');
+        resetBtn.textContent = 'Restaurar alvos';
+        resetBtn.style.fontSize = '11px';
+        resetBtn.style.marginBottom = '6px';
+        resetBtn.title = 'Limpa o cooldown desta aldeia — alvos já tentados voltam a aparecer';
+        resetBtn.addEventListener('click', async () => {
+          const removed = await storage.removeByPrefix(`auto-farm:lastSent:${myVillage.id}:`);
+          log.info(`${removed} alvo(s) restaurado(s).`);
+          renderAll();
+        });
+        panel.appendChild(resetBtn);
+
+        const listEl = document.createElement('div');
+        listEl.textContent = 'Buscando aldeias bárbaras próximas...';
+        panel.appendChild(listEl);
+
         const targets = await findTargets(ctx, myVillage, settings);
-
         listEl.innerHTML = '';
         if (targets.length === 0) {
           listEl.textContent = 'Nenhum alvo bárbaro disponível no alcance / fora do cooldown.';
@@ -829,50 +1035,13 @@
           const btn = document.createElement('button');
           btn.textContent = settings.dryRun ? 'Simular' : 'Enviar';
           btn.style.fontSize = '11px';
-          btn.addEventListener('click', async () => {
-            const unitInput = document.querySelector('#unit_input_' + settings.unit);
-            const available = unitInput ? Number(unitInput.dataset.allCount || 0) : 0;
-            const amount = Math.min(settings.amount, available);
-
-            if (settings.dryRun) {
-              if (available <= 0) {
-                log.info(`(modo teste) enviaria ${settings.amount} "${settings.unit}" para ${target.x}|${target.y} — mas você tem 0 disponíveis agora, um envio real seria bloqueado.`);
-              } else {
-                log.info(`(modo teste) enviaria ${amount} "${settings.unit}" para ${target.x}|${target.y}${amount < settings.amount ? ` (só ${available} disponíveis)` : ''}`);
-              }
-              return;
-            }
-
-            if (available <= 0) {
-              log.warn(`Sem "${settings.unit}" disponível nesta aldeia (0 unidades) — não enviado.`);
-              return;
-            }
-            if (amount < settings.amount) {
-              log.warn(`Só ${available} "${settings.unit}" disponíveis — enviando ${amount} em vez de ${settings.amount}.`);
-            }
-
-            btn.disabled = true;
-            btn.textContent = 'Enviando...';
-            const csrf = gameApi.getGameData()?.csrf;
-            const result = await submitAttack(myVillage.id, settings.unit, amount, target.x, target.y, csrf);
-            btn.disabled = false;
-            btn.textContent = 'Enviar';
-
-            if (!result.ok) {
-              log.error('Falha ao enviar:', result.reason, '— alvo continua na lista.');
-              return;
-            }
-
-            log.info(`Enviado: ${amount} "${settings.unit}" -> ${target.x}|${target.y}.`);
-            await ctx.storage.set(cooldownKey(myVillage.id, target.id), Date.now());
-            row.remove();
-          });
+          btn.addEventListener('click', () => sendToTarget(target, row, btn));
           row.appendChild(btn);
           listEl.appendChild(row);
         }
       }
 
-      await refreshList();
+      await renderAll();
     },
   });
 })();
