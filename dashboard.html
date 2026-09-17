@@ -294,6 +294,21 @@ kbd {
 .meter { height: 4px; background: var(--ink-3); border-radius: 4px; margin-top: 10px; overflow: hidden; }
 .meter i { display: block; height: 100%; background: linear-gradient(90deg, var(--ember-2), var(--ember)); border-radius: 4px; transition: width .4s; }
 
+.livecard { margin-top: 14px; padding: 14px 16px; border-radius: var(--radius); border: 1px solid var(--line); background: rgba(26, 24, 21, 0.55); }
+.livecard-empty { display: flex; align-items: center; gap: 10px; color: var(--text-3); font-size: 12.5px; }
+.livecard-empty .ico { color: var(--ember); flex: none; }
+.livecard-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.livecard-head b { display: flex; align-items: center; gap: 6px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-2); }
+.livebars { display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; }
+.livebar { display: grid; grid-template-columns: 60px 1fr 70px; align-items: center; gap: 10px; font-size: 12px; }
+.livebar-label { color: var(--text-3); }
+.livebar-track { height: 6px; border-radius: 4px; background: var(--ink-3); overflow: hidden; }
+.livebar-track i { display: block; height: 100%; background: linear-gradient(90deg, var(--ember-2), var(--ember)); border-radius: 4px; }
+.livebar-val { text-align: right; font-family: var(--mono); color: var(--text-2); }
+.livetroops { display: flex; flex-wrap: wrap; gap: 6px; }
+.troop-chip { padding: 4px 9px; border-radius: 999px; background: var(--ink-3); font-size: 12px; font-family: var(--mono); }
+.troop-chip small { font-family: var(--sans); color: var(--text-3); margin-left: 3px; }
+
 .testband {
   display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
   margin-top: 18px; padding: 14px 16px; border-radius: var(--radius);
@@ -378,6 +393,17 @@ kbd {
 .picker .pk-v b { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .picker .pk-v span { font-size: 11.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .picker .ico { color: var(--text-3); }
+
+.tpl-box { border-top: 1px dashed var(--line-2); padding-top: 10px; margin-top: 2px; }
+.tpl-list { display: flex; flex-direction: column; gap: 6px; }
+.tpl-row { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--ink-1); }
+.tpl-row.active { border-color: rgba(233, 165, 75, 0.4); background: var(--ember-soft); }
+.tpl-pick { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: var(--text-3); border: 1px solid var(--line-2); flex: none; }
+.tpl-row.active .tpl-pick { color: var(--ember); border-color: rgba(233, 165, 75, 0.5); }
+.tpl-name { font-size: 13px; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: baseline; gap: 8px; }
+.tpl-name small { font-weight: 400; color: var(--text-3); font-size: 11px; white-space: nowrap; }
+.tpl-unit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.tpl-unit-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--text-2); }
 
 .fine-wrap { border-top: 1px dashed var(--line-2); padding-top: 10px; }
 .fine-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); padding: 2px 0; }
@@ -712,24 +738,37 @@ const UNITS = [
   { value: 'heavy', label: 'Cavalaria pesada' },
 ];
 const unitLabel = (v) => (UNITS.find((u) => u.value === v) || { label: v }).label;
+const ATTACK_UNITS = [
+  ...UNITS,
+  { value: 'ram', label: 'Aríete' },
+  { value: 'catapult', label: 'Catapulta' },
+  { value: 'knight', label: 'Paladino' },
+  { value: 'snob', label: 'Nobre' },
+];
+const attackUnitLabel = (v) => (ATTACK_UNITS.find((u) => u.value === v) || { label: v }).label;
 
 const GROUPS = ['Ofensiva', 'Exército', 'Economia', 'Alertas'];
 const MODULES = [
   {
     id: 'auto-farm', name: 'Auto Farm', group: 'Ofensiva', icon: 'target', screen: 'Praça de reunião',
     desc: 'Encontra aldeias bárbaras próximas e envia ataques com seus modelos de tropas.',
-    defaults: { maxDistance: 12, cooldownMinutes: 30, dryRun: true },
+    defaults: { maxDistance: 12, cooldownMinutes: 30, dryRun: true, templates: [], activeTemplateId: null },
+    templates: true,
     presets: [
       { id: 'leve', label: 'Leve', settings: { maxDistance: 8, cooldownMinutes: 60 } },
       { id: 'equilibrado', label: 'Equilibrado', settings: { maxDistance: 12, cooldownMinutes: 30 } },
       { id: 'agressivo', label: 'Agressivo', settings: { maxDistance: 20, cooldownMinutes: 15 } },
     ],
-    hint: (s) => `${s.maxDistance} campos · a cada ${s.cooldownMinutes} min`,
+    hint: (s) => {
+      const tpl = (s.templates || []).find((t) => t.id === s.activeTemplateId);
+      const tplTxt = tpl ? `modelo "${tpl.name}"` : (s.templates || []).length ? 'nenhum modelo ativo' : 'sem modelos';
+      return `${s.maxDistance} campos · a cada ${s.cooldownMinutes} min · ${tplTxt}`;
+    },
     fields: [
       { key: 'maxDistance', type: 'range', label: 'Distância máxima', min: 1, max: 40, step: 1, unit: 'campos' },
       { key: 'cooldownMinutes', type: 'range', label: 'Espera por alvo', min: 5, max: 240, step: 5, unit: 'min' },
     ],
-    note: 'Os modelos de tropas continuam sendo criados dentro do jogo, na Praça de reunião.',
+    note: 'O modelo ativo abaixo é o mesmo que o script usa para enviar — mudou aqui, muda no jogo em segundos, sem precisar recarregar a página.',
   },
   {
     id: 'scheduler', name: 'Agendador', group: 'Ofensiva', icon: 'clock', screen: 'Praça de reunião',
@@ -1336,6 +1375,7 @@ function renderMain() {
         </div>
       </div>
       <div class="stats" id="heroStats">${statsHTML(key)}</div>
+      <div id="liveBox">${liveHTML(key)}</div>
       <div class="testband ${ts === 'false' ? 'live' : ''}" id="testband">${testbandHTML(ts)}</div>
     </section>
     ${groups}
@@ -1354,6 +1394,38 @@ function statsHTML(key) {
     <div class="stat"><div class="k">Aldeias</div><div class="v">${s ? fmt(s.villages) : '—'}</div><div class="h">${s && s.village ? esc(`${s.village.name} (${s.village.x}|${s.village.y})`) : '—'}</div></div>
     <div class="stat"><div class="k">Último sinal</div><div class="v">${s ? esc(ago(s.lastSeen)) : '—'}</div><div class="h">${s ? `script v${esc(s.version)}` : 'nunca conectada'}</div></div>
     <div class="stat"><div class="k">Módulos ativos</div><div class="v">${on}<small> / ${MODULES.length}</small></div><div class="meter"><i style="width:${pct}%"></i></div></div>`;
+}
+
+function liveHTML(key) {
+  const s = state.accounts[key];
+  if (!s || !s.resources) {
+    return `<div class="livecard livecard-empty">${icon('bolt', 'sm')}<span>Status ao vivo aparece aqui assim que o script rodar uma vez nesta conta (até ~90s depois de abrir o jogo).</span></div>`;
+  }
+  const res = s.resources;
+  const pct = (n) => res.storageMax ? Math.min(100, Math.round((n / res.storageMax) * 100)) : 0;
+  const resBar = (key2, label) => `
+    <div class="livebar">
+      <span class="livebar-label">${esc(label)}</span>
+      <div class="livebar-track"><i style="width:${pct(res[key2])}%"></i></div>
+      <span class="livebar-val">${fmt(res[key2])}</span>
+    </div>`;
+  const troops = s.troops ? Object.entries(s.troops).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]) : null;
+  const troopsHTML = troops && troops.length
+    ? troops.map(([u, n]) => `<span class="troop-chip">${fmt(n)} <small>${esc(attackUnitLabel(u))}</small></span>`).join('')
+    : '<span class="note">sem tropas em casa (ou não lido ainda)</span>';
+  const incoming = s.incomingAttacks
+    ? `<span class="tag tag-off" style="background:var(--rose-soft);color:var(--rose)">⚠ ${s.incomingAttacks} ataque${s.incomingAttacks > 1 ? 's' : ''} a caminho</span>`
+    : (s.incoming !== undefined ? '<span class="tag tag-live">sem ataques a caminho</span>' : '');
+  return `
+    <div class="livecard">
+      <div class="livecard-head">
+        <b>${icon('bolt', 'sm')}Ao vivo</b>
+        ${incoming}
+        <span class="note" style="margin-left:auto">atualizado ${esc(ago(s.at || s.lastSeen))}</span>
+      </div>
+      <div class="livebars">${resBar('wood', 'Madeira')}${resBar('stone', 'Argila')}${resBar('iron', 'Ferro')}</div>
+      <div class="livetroops">${troopsHTML}</div>
+    </div>`;
 }
 
 function testbandHTML(ts) {
@@ -1390,8 +1462,31 @@ function tileHTML(m, cfg) {
         <span class="pk-v"><b data-pk-title>${esc(lbl.title)}</b><span data-pk-sub>${esc(lbl.sub)}</span></span>
         ${icon('chev', 'sm')}
       </button>
+      ${m.templates ? templatesHTML(m, cfg) : ''}
       ${fine}
     </article>`;
+}
+
+function templatesHTML(m, cfg) {
+  const templates = cfg.settings.templates || [];
+  const activeId = cfg.settings.activeTemplateId;
+  const rows = templates.length ? templates.map((t) => {
+    const n = ATTACK_UNITS.reduce((acc, u) => acc + (t.units[u.value] || 0), 0);
+    return `
+      <div class="tpl-row ${t.id === activeId ? 'active' : ''}" data-tpl-row="${t.id}">
+        <button class="tpl-pick" data-tpl-use="${m.id}:${t.id}" type="button" title="Usar este modelo">
+          ${icon(t.id === activeId ? 'check' : 'target', 'sm')}
+        </button>
+        <span class="tpl-name">${esc(t.name)}<small>${n} tropa${n === 1 ? '' : 's'}</small></span>
+        <button class="icon-btn" style="height:28px;padding:0 8px" data-tpl-edit="${m.id}:${t.id}" type="button" title="Editar">${icon('chev', 'sm')}</button>
+        <button class="icon-btn" style="height:28px;padding:0 8px" data-tpl-del="${m.id}:${t.id}" type="button" title="Excluir">${icon('trash', 'sm')}</button>
+      </div>`;
+  }).join('') : '<p class="note" style="margin:6px 0">Nenhum modelo de tropas ainda.</p>';
+  return `
+    <div class="tpl-box">
+      <div class="tpl-list">${rows}</div>
+      <button class="btn-ghost btn-sm" style="width:100%;margin-top:8px" data-tpl-new="${m.id}" type="button">${icon('plus', 'sm')}Novo modelo de tropas</button>
+    </div>`;
 }
 
 function fieldHTML(m, f, s) {
@@ -1460,6 +1555,8 @@ function refreshChrome() {
   const p = state.profiles[key];
   const stats = $('#heroStats');
   if (stats) stats.innerHTML = statsHTML(key);
+  const live = $('#liveBox');
+  if (live) live.innerHTML = liveHTML(key);
   const band = $('#testband');
   if (band) {
     const ts = testState(p);
@@ -1734,6 +1831,42 @@ main.addEventListener('click', (e) => {
     sw.setAttribute('aria-checked', String(cfg.settings[fk]));
     touch(key);
     refreshTile(id);
+    return;
+  }
+
+  const tplNew = t.closest('[data-tpl-new]');
+  if (tplNew) return openTemplateEditor(tplNew.dataset.tplNew, null);
+
+  const tplEdit = t.closest('[data-tpl-edit]');
+  if (tplEdit) {
+    const [id, tplId] = tplEdit.dataset.tplEdit.split(':');
+    const tpl = (p.modules[id].settings.templates || []).find((x) => x.id === tplId);
+    return openTemplateEditor(id, tpl);
+  }
+
+  const tplUse = t.closest('[data-tpl-use]');
+  if (tplUse) {
+    const [id, tplId] = tplUse.dataset.tplUse.split(':');
+    const cfg = p.modules[id];
+    cfg.settings.activeTemplateId = cfg.settings.activeTemplateId === tplId ? null : tplId;
+    touch(key);
+    rerenderTile(id);
+    refreshChrome();
+    return;
+  }
+
+  const tplDel = t.closest('[data-tpl-del]');
+  if (tplDel) {
+    const [id, tplId] = tplDel.dataset.tplDel.split(':');
+    const cfg = p.modules[id];
+    const tpl = (cfg.settings.templates || []).find((x) => x.id === tplId);
+    if (tpl && confirm(`Excluir o modelo "${tpl.name}"?`)) {
+      cfg.settings.templates = cfg.settings.templates.filter((x) => x.id !== tplId);
+      if (cfg.settings.activeTemplateId === tplId) cfg.settings.activeTemplateId = null;
+      touch(key);
+      rerenderTile(id);
+      refreshChrome();
+    }
   }
 });
 
@@ -2179,6 +2312,62 @@ function openBulk() {
   });
 }
 
+// ---- Modelo de tropas (auto-farm) ----
+function openTemplateEditor(moduleId, existingTpl) {
+  const key = state.selected;
+  const isNew = !existingTpl;
+  const units = { ...(existingTpl ? existingTpl.units : {}) };
+
+  openModal(`
+    ${modalHead('target', isNew ? 'Novo modelo de tropas' : `Editar "${esc(existingTpl.name)}"`, 'É este modelo que o Auto Farm usa para enviar — a mudança chega no jogo em segundos.')}
+    <div class="modal-body">
+      <label><span class="field-label">Nome do modelo</span><input class="field" id="t-name" placeholder="Ex.: Padrão, Limpeza, Pesado" value="${existingTpl ? esc(existingTpl.name) : ''}" autocomplete="off"></label>
+      <div class="tpl-unit-grid" style="margin-top:16px" id="t-units"></div>
+    </div>
+    <div class="modal-foot"><span class="spacer"></span>
+      <button class="btn-ghost" data-close type="button">Cancelar</button>
+      <button class="btn-primary" id="t-save" type="button">${icon('check', 'sm')}Salvar modelo</button>
+    </div>`, {
+    onMount(root) {
+      const grid = root.querySelector('#t-units');
+      grid.innerHTML = ATTACK_UNITS.map((u) => `
+        <label>${esc(u.label)}<input class="field" type="number" min="0" step="1" inputmode="numeric" data-unit="${u.value}" value="${units[u.value] || ''}" placeholder="0"></label>
+      `).join('');
+
+      const save = () => {
+        const name = root.querySelector('#t-name').value.trim();
+        if (!name) return toast('Dê um nome ao modelo', 'err');
+        const newUnits = {};
+        let any = false;
+        grid.querySelectorAll('[data-unit]').forEach((inp) => {
+          const n = Math.max(0, Math.round(Number(inp.value) || 0));
+          if (n > 0) { newUnits[inp.dataset.unit] = n; any = true; }
+        });
+        if (!any) return toast('Informe ao menos 1 tropa', 'err');
+
+        const cfg = state.profiles[key].modules[moduleId];
+        cfg.settings.templates = cfg.settings.templates || [];
+        if (isNew) {
+          const id = 'tpl_' + Math.random().toString(36).slice(2, 10);
+          cfg.settings.templates.push({ id, name, units: newUnits });
+          if (!cfg.settings.activeTemplateId) cfg.settings.activeTemplateId = id;
+        } else {
+          const t = cfg.settings.templates.find((x) => x.id === existingTpl.id);
+          t.name = name;
+          t.units = newUnits;
+        }
+        touch(key);
+        rerenderTile(moduleId);
+        refreshChrome();
+        toast(isNew ? 'Modelo criado' : 'Modelo atualizado');
+        closeModal();
+      };
+      root.querySelector('#t-save').addEventListener('click', save);
+      root.querySelector('#t-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+    },
+  });
+}
+
 // ---- Salvar como modelo ----
 function openSaveModel() {
   const key = state.selected;
@@ -2430,6 +2619,14 @@ document.addEventListener('keydown', (e) => {
 loadLocal();
 renderAll();
 setInterval(renderRail, 60000);
+setInterval(async () => {
+  if (!bridge.connected) return;
+  try {
+    await pullFromBridge();
+    renderRail();
+    refreshChrome();
+  } catch { /* falha temporária — tenta de novo no próximo ciclo */ }
+}, 20000);
 [0, 500, 1500, 4000].forEach((ms) => setTimeout(() => { if (!bridge.connected) connectBridge(); }, ms));
 })();
 </script>

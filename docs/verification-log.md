@@ -81,8 +81,28 @@ Não depende de seletor novo do jogo — os modelos são uma estrutura nossa (`s
 
 **VERIFIED (2026-09-19)** — testado ao vivo pelo usuário: criar modelo, selecionar como ativo, enviar com múltiplas tropas de uma vez. Funcionando.
 
+## Fase 5 — v1.2.0: módulos reescritos (2026-09-20)
+
+Contexto: v0.6/v0.7/v1.0 tinham 6 módulos que só *fingiam* agir — procuravam botões por texto (`textContent.includes('construir')`), clicavam DOM sem verificar se existia, ou (o Agendador) dependiam de a aba estar parada na tela exata de confirmação no segundo certo. Reescritos em `shared.js` (motor comum) + módulos próprios, usando o mesmo padrão que funcionou no Auto Farm: ler a página real via `fetch()`, extrair dados de estruturas que o próprio jogo já embute no HTML, e submeter via `ajaxaction=` (cabeçalho `TribalWars-Ajax: 1`) ou POST de formulário real — nunca clique simulado.
+
+**Nenhum destes foi testado contra o jogo ao vivo ainda** — só logicamente contra a documentação/código de projetos abertos citados (GPL-3 `stefan2200/TWB`, consultado só como referência de endpoints, nada de código copiado; MIT `victorgare/tribalwars`, mesma coisa). Marcar cada item como VERIFIED aqui assim que for confirmado.
+
+| Módulo | Endpoint assumido | Status |
+|---|---|---|
+| Agendador | `place&try=confirm` + `place&action=command` (mesmos 2 POSTs do Auto Farm, já VERIFIED) — roda em `screens: ['any']` agora, não depende mais da aba estar na tela de confirmação | Envio em si VERIFIED (reusa `submitAttack`); a *independência de tela* e o cálculo de horário de chegada (duração lida da resposta da etapa 1) — UNVERIFIED |
+| Recrutamento | `ajaxaction=train` no quartel/estábulo/oficina; `#<unidade>_0_cost_<recurso>` e `#<unidade>_0_a` pro custo/máximo | UNVERIFIED |
+| Coleta / Coleta em Massa | `var village = {...}` na página `place&mode=scavenge` (opções bloqueadas/ocupadas); `ajaxaction=send_squads` em `scavenge_api`; divisão de tropas com pesos 15/6/3/2 | UNVERIFIED |
+| Mega Construtor | `BuildingMain.buildings = {...}` (regex no HTML da tela principal); `ajaxaction=upgrade_building` | UNVERIFIED |
+| Balanceador | Recursos/armazém lidos de `TribalWars.updateGameData(...)` embutido no HTML de `market&mode=send`; envio reusa o fluxo de mercado abaixo | UNVERIFIED |
+| Envio de recursos (mercado) | `market&mode=send` → formulário de confirmação → 2º POST | UNVERIFIED |
+| Status ao vivo (`live-status`, sempre ativo) | Tropas em casa: mesma leitura do Auto Farm (`#unit_input_<u>`, `data-all-count`) na Praça de Reunião. Ataques a caminho: tela `info_command&type=incomings` — **nome de tela e formato de tabela não confirmados**, pode simplesmente não achar nada (o snapshot não quebra se essa parte falhar) | UNVERIFIED |
+
+**Como testar cada um com segurança**: todos nasceram com `dryRun: true` por padrão — ligam, mostram no console o que fariam, e não tocam em nada. Ative modo real um módulo por vez.
+
+**Sincronização dashboard ↔ jogo**: perfis (`twsuite:profiles`) trocam via `postMessage` entre `dashboard.html` (aberto como `file://`) e o script rodando na aba do jogo. O Auto Farm agora relê a configuração a cada ~8s enquanto a página está aberta (`window.TWSuite.applyProfileNow` + comparação de `templates`/`activeTemplateId`) — os outros módulos econômicos releem a configuração a cada ciclo próprio (25s–30min conforme o módulo), então uma mudança no dashboard vale a partir do próximo ciclo, sem precisar recarregar. Ligar/desligar um módulo continua valendo só no próximo carregamento de página (limitação conhecida, documentada no `DASHBOARD.md`).
+
 ## Fases futuras (ainda não implementadas)
 
-- Fase 2 (Agendador): a duração de viagem e hora de chegada já vêm na resposta da etapa 1 (`submitAttackStep1`) — dá pra extrair de lá em vez de precisar de um seletor novo. O agendador provavelmente também deve usar `fetch()` direto (`submitAttack`) na hora certa, em vez de tentar clicar em algo.
-- Fase 3 (Construção automática): estrutura da fila de construção e convenção de id/link por edifício — não identificado ainda.
-- Fase 4 (Notificações): seletor do indicador de ataque chegando e do overlay de captcha/proteção anti-bot — não identificado ainda.
+- Auto Defesa: ainda no formato antigo (detecta "ataque" como texto solto na página — falso-positivo praticamente garantido). Candidato a reescrever com o mesmo parser de `info_command` do live-status, uma vez confirmado.
+- Notificações: só Discord; WhatsApp via CallMeBot já está pronto em `shared.notify()` mas sem UI no dashboard/painel nativo pra configurar telefone/apikey.
+- Recursos citados pelo usuário mas ainda não implementados: Snip por Cancelamento, Cunhar Moedas (rascunho existe mas não integrado), Etiquetador de Comandos, Compra/Venda no mercado, Derrubar Muralha, Farm pelo Mapa, Upar Paladino em Massa.

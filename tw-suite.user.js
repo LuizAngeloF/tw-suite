@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.1.0
+// @version      1.2.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -275,7 +275,10 @@
       if (!key) return;
       const gd = gameApi.getGameData();
       const accounts = (await storage.get('accounts', {})) || {};
+      // Merge (não sobrescreve) — o módulo live-status também escreve nesta
+      // mesma chave com recursos/tropas/ataques a caminho, em ciclo próprio.
       accounts[key] = {
+        ...(accounts[key] || {}),
         world: String(gd.world).toLowerCase(),
         player: gd.player.name,
         points: Number(gd.player.points) || 0,
@@ -508,7 +511,7 @@
     async function renderModuleList() {
       if (!panelEl) return;
       const listEl = panelEl.querySelector('#twsuite-module-list');
-      const registry = moduleLoader.getRegistry();
+      const registry = moduleLoader.getRegistry().filter((m) => m.id !== 'live-status');
       if (registry.length === 0) {
         listEl.innerHTML = '<em>Nenhum módulo instalado ainda (núcleo apenas — Fase 0).</em>';
         return;
@@ -577,6 +580,8 @@
     serverTime,
     ui,
     log,
+    accountKeyFromGame: profiles.accountKeyFromGame,
+    applyProfileNow: profiles.applyForCurrentAccount,
   };
 
   // ============================================================
@@ -611,6 +616,658 @@
   } else {
     bootstrap();
   }
+})();
+
+// ============================================================
+// SHARED — utilitários usados pelos módulos (v1.2.0)
+//
+// Rotas do jogo usadas aqui:
+//  - place try=confirm / action=command: VERIFIED via HAR (ver verification-log).
+//  - ajaxaction (train, send_squads, exchange_begin/confirm): mesmo formato
+//    usado por stefan2200/TWB (GPL-3, só consultado como referência).
+//  Tudo que não foi confirmado ao vivo está marcado UNVERIFIED nos módulos.
+// ============================================================
+(function registerShared() {
+  'use strict';
+
+  const TW = window.TWSuite;
+  const pageWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+  const TAB_ID = Math.random().toString(36).slice(2, 10);
+
+  const UNITS = ['spear', 'sword', 'axe', 'archer', 'spy', 'light', 'marcher', 'heavy', 'ram', 'catapult', 'knight', 'snob'];
+  const UNIT_LABELS = {
+    spear: 'Lanceiro', sword: 'Espadachim', axe: 'Bárbaro', archer: 'Arqueiro', spy: 'Explorador',
+    light: 'Cavalaria leve', marcher: 'Arqueiro a cavalo', heavy: 'Cavalaria pesada', ram: 'Aríete',
+    catapult: 'Catapulta', knight: 'Paladino', snob: 'Nobre',
+  };
+  const RESOURCES = ['wood', 'stone', 'iron'];
+  const RES_LABELS = { wood: 'Madeira', stone: 'Argila', iron: 'Ferro' };
+
+  class BotCheckError extends Error {
+    constructor() {
+      super('Proteção anti-bot ativa');
+      this.name = 'BotCheckError';
+    }
+  }
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const jitter = (min, max) => Math.round(min + Math.random() * Math.max(0, max - min));
+  const gd = () => TW.gameApi.getGameData();
+  const csrf = () => (gd() && gd().csrf) || '';
+  const villageId = () => gd() && gd().village && gd().village.id;
+  const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+  const num = (s) => Number(String(s == null ? '' : s).replace(/[^\d-]/g, '')) || 0;
+
+  function parseHtml(html) {
+    return new DOMParser().parseFromString(html, 'text/html');
+  }
+
+  function gameDataFromHtml(text) {
+    const m = text.match(/TribalWars\.updateGameData\((\{.+?\})\);/s);
+    if (!m) return null;
+    try { return JSON.parse(m[1]); } catch { return null; }
+  }
+
+  function formParams(form, overrides = {}) {
+    const params = new URLSearchParams();
+    for (const el of form.elements) {
+      if (!el.name || el.disabled) continue;
+      const type = (el.type || '').toLowerCase();
+      if (['submit', 'button', 'image', 'reset', 'file'].includes(type)) continue;
+      if ((type === 'checkbox' || type === 'radio') && !el.checked) continue;
+      params.append(el.name, el.value);
+    }
+    for (const [k, v] of Object.entries(overrides)) params.set(k, v == null ? '' : String(v));
+    return params;
+  }
+
+  function appendData(params, data, prefix) {
+    for (const [k, v] of Object.entries(data)) {
+      const key = prefix ? `${prefix}[${k}]` : k;
+      if (v && typeof v === 'object') appendData(params, v, key);
+      else params.append(key, v == null ? '' : String(v));
+    }
+    return params;
+  }
+
+  // ---------- captcha / proteção anti-bot ----------
+  const botState = { active: false };
+  const BOT_SELECTORS = '#bot_check, #botprotection_quest, .bot-protection-row, iframe[src*="hcaptcha"], iframe[src*="recaptcha"]';
+
+  function pageHasBotCheck(root = document) {
+    return !!root.querySelector(BOT_SELECTORS);
+  }
+
+  function textHasBotCheck(text) {
+    return /id="bot_check"|botprotection_quest|bot-protection-row|hcaptcha\.com/i.test(text);
+  }
+
+  async function flagBotCheck() {
+    if (botState.active) return;
+    botState.active = true;
+    TW.log.warn('Proteção anti-bot detectada — automações pausadas até recarregar a página depois de resolver.');
+    const last = await TW.storage.get('shared:lastBotNotify', 0);
+    if (Date.now() - last > 10 * 60 * 1000) {
+      await TW.storage.set('shared:lastBotNotify', Date.now());
+      notify('🛑 Captcha / proteção anti-bot na tela. As automações pararam até você resolver.', { kind: 'captcha' });
+    }
+  }
+
+  async function guard() {
+    if (botState.active) return false;
+    if (pageHasBotCheck()) {
+      await flagBotCheck();
+      return false;
+    }
+    return true;
+  }
+
+  // ---------- HTTP ----------
+  async function getPage(url) {
+    const res = await fetch(url, { credentials: 'same-origin' });
+    const text = await res.text();
+    if (textHasBotCheck(text)) {
+      await flagBotCheck();
+      throw new BotCheckError();
+    }
+    return { ok: res.ok, status: res.status, text, doc: parseHtml(text), url: res.url };
+  }
+
+  async function postForm(url, params) {
+    const res = await fetch(url, { method: 'POST', body: params, credentials: 'same-origin' });
+    const text = await res.text();
+    if (textHasBotCheck(text)) {
+      await flagBotCheck();
+      throw new BotCheckError();
+    }
+    return { ok: res.ok, status: res.status, text, redirected: res.redirected, url: res.url };
+  }
+
+  function errorFromHtml(text) {
+    if (!text.includes('error_box')) return null;
+    const box = parseHtml(text).querySelector('.error_box');
+    return (box && box.textContent.trim().replace(/\s+/g, ' ')) || 'o jogo recusou a ação';
+  }
+
+  async function ajax(screen, action, data = {}, extra = {}, vid = villageId()) {
+    const q = new URLSearchParams({ village: String(vid), screen, ajaxaction: action, h: csrf() });
+    for (const [k, v] of Object.entries(extra)) q.set(k, String(v));
+    const body = appendData(new URLSearchParams(), { ...data, h: csrf() });
+    const res = await fetch(`/game.php?${q}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'TribalWars-Ajax': '1',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      },
+      body,
+    });
+    const text = await res.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch { /* resposta não-JSON */ }
+    if (!json) {
+      if (textHasBotCheck(text)) { await flagBotCheck(); throw new BotCheckError(); }
+      return { ok: false, reason: `HTTP ${res.status}: resposta inesperada` };
+    }
+    if (json.bot_protect) { await flagBotCheck(); throw new BotCheckError(); }
+    if (json.error) {
+      const reason = Array.isArray(json.error) ? json.error.join(' ') : String(json.error);
+      return { ok: false, reason, json };
+    }
+    return { ok: true, json, response: json.response };
+  }
+
+  // ---------- comandos (ataque / apoio) ----------
+  async function getPlaceDoc(vid) {
+    const here = document.querySelector('#inputx');
+    if (here && String(villageId()) === String(vid) && TW.gameApi.getCurrentScreen() === 'place' && !location.search.includes('try=')) {
+      return document;
+    }
+    const { doc } = await getPage(`/game.php?village=${vid}&screen=place`);
+    return doc;
+  }
+
+  function availableUnits(doc) {
+    const out = {};
+    for (const u of UNITS) {
+      const input = doc.querySelector(`#unit_input_${u}`);
+      out[u] = input ? Number(input.getAttribute('data-all-count') || 0) : 0;
+    }
+    return out;
+  }
+
+  // Etapa 1 (try=confirm). units: { spear: 10 | 'all' }. Retorna o formulário
+  // de confirmação e a duração, sem enviar nada ainda.
+  async function prepareCommand({ villageId: vid, units, x, y, type = 'attack', capToAvailable = true }) {
+    const doc = await getPlaceDoc(vid);
+    const input = doc.querySelector('#inputx');
+    const form = input && (input.form || input.closest('form'));
+    if (!form) return { ok: false, reason: 'formulário da Praça de Reunião não encontrado' };
+
+    const avail = availableUnits(doc);
+    const finalUnits = {};
+    let any = false;
+    for (const u of UNITS) {
+      let n = units[u] === 'all' ? avail[u] : Number(units[u] || 0);
+      if (capToAvailable) n = Math.min(n, avail[u]);
+      finalUnits[u] = Math.max(0, n);
+      if (finalUnits[u] > 0) any = true;
+    }
+    if (!any) return { ok: false, reason: 'nenhuma tropa disponível para esse envio', available: avail };
+
+    const o1 = { x, y, target_type: 'coord' };
+    if (type === 'support') o1.support = 'Apoio';
+    else o1.attack = 'Ataque';
+    for (const u of UNITS) o1[u] = finalUnits[u] > 0 ? finalUnits[u] : '';
+
+    const r1 = await postForm(`/game.php?village=${vid}&screen=place&try=confirm`, formParams(form, o1));
+    if (!r1.ok) return { ok: false, reason: `etapa 1 falhou: HTTP ${r1.status}` };
+    const err = errorFromHtml(r1.text);
+    if (err) return { ok: false, reason: err };
+
+    const cdoc = parseHtml(r1.text);
+    const confirmForm = (cdoc.querySelector('#troop_confirm_submit') || {}).form
+      || (cdoc.querySelector('#troop_confirm_submit') && cdoc.querySelector('#troop_confirm_submit').closest('form'))
+      || cdoc.querySelector('form');
+    if (!confirmForm) return { ok: false, reason: 'formulário de confirmação não encontrado' };
+    const durEl = cdoc.querySelector('.relative_time[data-duration]') || cdoc.querySelector('[data-duration]');
+    const durationMs = durEl ? Number(durEl.getAttribute('data-duration')) * 1000 : null;
+
+    return { ok: true, vid, x, y, type, units: finalUnits, confirmForm, durationMs };
+  }
+
+  // Etapa 2 (action=command) — token h = game_data.csrf (VERIFIED).
+  async function confirmCommand(prep) {
+    const o2 = { cb: 'troop_confirm_submit', building: 'main', x: prep.x, y: prep.y, source_village: prep.vid, village: prep.vid, h: csrf() };
+    if (prep.type === 'support') {
+      o2.support = 'true';
+      o2.submit_confirm = 'Enviar apoio';
+    } else {
+      o2.attack = 'true';
+      o2.submit_confirm = 'Enviar ataque';
+    }
+    for (const u of UNITS) o2[u] = prep.units[u] || 0;
+    const startedAt = TW.serverTime.now();
+    const r2 = await postForm(`/game.php?village=${prep.vid}&screen=place&action=command`, formParams(prep.confirmForm, o2));
+    const endedAt = TW.serverTime.now();
+    if (!r2.ok) return { ok: false, reason: `etapa 2 falhou: HTTP ${r2.status}` };
+    const err = errorFromHtml(r2.text);
+    if (err) return { ok: false, reason: err };
+    return { ok: true, startedAt, endedAt, sentAt: Math.round((startedAt + endedAt) / 2), html: r2.text };
+  }
+
+  async function sendCommand(opts) {
+    const prep = await prepareCommand(opts);
+    if (!prep.ok) return prep;
+    const res = await confirmCommand(prep);
+    return { ...res, units: prep.units, durationMs: prep.durationMs };
+  }
+
+  // Comandos próprios que ainda podem ser cancelados (links action=cancel).
+  // UNVERIFIED: formato exato da tabela; busca só pelo padrão do link.
+  function cancelLinks(doc) {
+    const seen = new Map();
+    for (const a of doc.querySelectorAll('a[href*="action=cancel"]')) {
+      const href = a.getAttribute('href') || '';
+      const m = href.match(/[?&]id=(\d+)/);
+      if (m && !seen.has(m[1])) seen.set(m[1], href);
+    }
+    return seen;
+  }
+
+  async function listCancelableCommands(vid) {
+    const { doc } = await getPage(`/game.php?village=${vid}&screen=place`);
+    return cancelLinks(doc);
+  }
+
+  async function cancelCommand(vid, id, href) {
+    let url = href ? new URL(href, location.origin) : new URL(`/game.php?village=${vid}&screen=place&action=cancel&id=${id}`, location.origin);
+    if (!url.searchParams.get('h')) url.searchParams.set('h', csrf());
+    const res = await getPage(url.pathname + url.search);
+    const err = errorFromHtml(res.text);
+    return err ? { ok: false, reason: err } : { ok: true };
+  }
+
+  // ---------- mercado: envio de recursos entre aldeias ----------
+  // UNVERIFIED: usa o formulário de screen=market&mode=send e o formulário
+  // devolvido na confirmação, lendo action/campos direto do HTML.
+  async function sendResources(fromVid, amounts, x, y) {
+    const { doc } = await getPage(`/game.php?village=${fromVid}&screen=market&mode=send`);
+    const woodInput = doc.querySelector('input[name="wood"]');
+    const form = woodInput && (woodInput.form || woodInput.closest('form'));
+    if (!form) return { ok: false, reason: 'formulário do mercado não encontrado (sem mercado nesta aldeia?)' };
+    const o1 = { wood: amounts.wood || 0, stone: amounts.stone || 0, iron: amounts.iron || 0, x, y, target_type: 'coord', input: `${x}|${y}` };
+    const action1 = form.getAttribute('action') || `/game.php?village=${fromVid}&screen=market&mode=send&try=confirm_send`;
+    const r1 = await postForm(new URL(action1, location.origin).toString(), formParams(form, o1));
+    const err1 = errorFromHtml(r1.text);
+    if (err1) return { ok: false, reason: err1 };
+    const cdoc = parseHtml(r1.text);
+    const cform = [...cdoc.querySelectorAll('form')].find((f) => /action=send|try=confirm_send|mode=send/.test(f.getAttribute('action') || ''));
+    if (!cform) return { ok: false, reason: 'confirmação do mercado não encontrada' };
+    const action2 = new URL(cform.getAttribute('action'), location.origin);
+    if (!action2.searchParams.get('h')) action2.searchParams.set('h', csrf());
+    const r2 = await postForm(action2.toString(), formParams(cform, { h: csrf() }));
+    const err2 = errorFromHtml(r2.text);
+    return err2 ? { ok: false, reason: err2 } : { ok: true };
+  }
+
+  // ---------- aldeias (village.txt, mesmo cache do Auto Farm) ----------
+  const VILLAGE_CACHE_KEY = 'auto-farm:villageIndexCache';
+  const VILLAGE_CACHE_TTL_MS = 3 * 60 * 60 * 1000;
+  let villageMemo = null;
+
+  function parseVillageTxt(text) {
+    const out = [];
+    for (const line of text.split('\n')) {
+      if (!line) continue;
+      const p = line.split(',');
+      if (p.length < 5) continue;
+      const x = Number(p[2]);
+      const y = Number(p[3]);
+      if (Number.isNaN(x) || Number.isNaN(y)) continue;
+      let name = p[1];
+      try { name = decodeURIComponent(p[1].replace(/\+/g, ' ')); } catch { /* mantém cru */ }
+      out.push({ id: p[0], name, x, y, owner: p[4], points: Number(p[5]) || 0 });
+    }
+    return out;
+  }
+
+  async function getVillageIndex() {
+    if (villageMemo && Date.now() - villageMemo.at < 5 * 60 * 1000) return villageMemo.list;
+    const cached = await TW.storage.get(VILLAGE_CACHE_KEY, null);
+    let text = cached && cached.text;
+    if (!cached || Date.now() - (cached.fetchedAt || 0) > VILLAGE_CACHE_TTL_MS) {
+      try {
+        const res = await fetch('/map/village.txt', { credentials: 'omit' });
+        if (res.ok) {
+          text = await res.text();
+          await TW.storage.set(VILLAGE_CACHE_KEY, { fetchedAt: Date.now(), text });
+        }
+      } catch (e) {
+        TW.log.warn('Falha ao atualizar village.txt, usando cache:', e);
+      }
+    }
+    const list = text ? parseVillageTxt(text) : [];
+    villageMemo = { at: Date.now(), list };
+    return list;
+  }
+
+  async function myVillages() {
+    const pid = gd() && gd().player && String(gd().player.id);
+    const list = (await getVillageIndex()).filter((v) => v.owner === pid);
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    return list;
+  }
+
+  // ---------- horário do servidor ----------
+  // O jogo mostra horário local do servidor em #serverDate / #serverTime.
+  // Guardamos a diferença entre esse relógio "de parede" e serverTime.now().
+  function serverWallOffsetMs() {
+    const d = document.querySelector('#serverDate');
+    const t = document.querySelector('#serverTime');
+    if (!d || !t) return null;
+    const dm = d.textContent.trim().match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    const tm = t.textContent.trim().match(/(\d{1,2}):(\d{2}):(\d{2})/);
+    if (!dm || !tm) return null;
+    const wall = Date.UTC(+dm[3], +dm[2] - 1, +dm[1], +tm[1], +tm[2], +tm[3]);
+    const raw = wall - TW.serverTime.now();
+    return Math.round(raw / (15 * 60 * 1000)) * 15 * 60 * 1000;
+  }
+
+  // Aceita "14:22:01:345", "hoje às 14:22:01:345", "amanhã às 14:22:01",
+  // "17/09 14:22:01:345" ou "17/09/2026 14:22:01". Retorna epoch (serverTime).
+  function parseGameTime(input) {
+    const s = String(input || '').trim().toLowerCase();
+    const tm = s.match(/(\d{1,2}):(\d{2}):(\d{2})(?:[:.,](\d{1,3}))?/);
+    if (!tm) return null;
+    const wallOffset = serverWallOffsetMs();
+    if (wallOffset == null) return null;
+    const nowWall = new Date(TW.serverTime.now() + wallOffset);
+    let y = nowWall.getUTCFullYear();
+    let mo = nowWall.getUTCMonth();
+    let da = nowWall.getUTCDate();
+    const dm = s.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+    let explicitDay = false;
+    if (dm) {
+      da = +dm[1];
+      mo = +dm[2] - 1;
+      if (dm[3]) y = dm[3].length === 2 ? 2000 + +dm[3] : +dm[3];
+      explicitDay = true;
+    } else if (/amanh/.test(s)) {
+      da += 1;
+      explicitDay = true;
+    }
+    const ms = tm[4] ? Number(tm[4].padEnd(3, '0')) : 0;
+    let wall = Date.UTC(y, mo, da, +tm[1], +tm[2], +tm[3], ms);
+    if (!explicitDay && wall < nowWall.getTime() - 1000) wall += 86400000;
+    return wall - wallOffset;
+  }
+
+  function formatServerTime(epochMs, withMs = true) {
+    const off = serverWallOffsetMs();
+    const d = new Date(epochMs + (off == null ? 0 : off));
+    const p = (n, l = 2) => String(n).padStart(l, '0');
+    const base = `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+    return withMs ? `${base}:${p(d.getUTCMilliseconds(), 3)}` : base;
+  }
+
+  let worldConfigMemo = null;
+  async function worldConfig() {
+    if (worldConfigMemo) return worldConfigMemo;
+    const cached = await TW.storage.get('shared:worldConfig', null);
+    if (cached && Date.now() - cached.at < 24 * 3600 * 1000) {
+      worldConfigMemo = cached.data;
+      return worldConfigMemo;
+    }
+    const data = { commandCancelTime: 600, speed: 1, unitSpeed: 1 };
+    try {
+      const res = await fetch('/interface.php?func=get_config', { credentials: 'omit' });
+      const xml = new DOMParser().parseFromString(await res.text(), 'text/xml');
+      const read = (sel) => { const n = xml.querySelector(sel); return n ? Number(n.textContent) : null; };
+      data.commandCancelTime = read('commands > command_cancel_time') || 600;
+      data.speed = read('config > speed') || 1;
+      data.unitSpeed = read('config > unit_speed') || 1;
+    } catch (e) {
+      TW.log.warn('get_config indisponível, usando cancelamento de 600s:', e);
+    }
+    await TW.storage.set('shared:worldConfig', { at: Date.now(), data });
+    worldConfigMemo = data;
+    return data;
+  }
+
+  // ---------- notificações (Discord + WhatsApp via CallMeBot) ----------
+  function gmRequest(opts) {
+    return new Promise((resolve, reject) => {
+      const fn = typeof GM_xmlhttpRequest === 'function'
+        ? GM_xmlhttpRequest
+        : (typeof GM !== 'undefined' && GM.xmlHttpRequest) ? GM.xmlHttpRequest : null;
+      if (!fn) {
+        fetch(opts.url, { method: opts.method, headers: opts.headers, body: opts.data }).then(resolve, reject);
+        return;
+      }
+      fn({ ...opts, timeout: 15000, onload: resolve, onerror: reject, ontimeout: reject });
+    });
+  }
+
+  async function notify(text, { kind = 'info', force = false } = {}) {
+    const enabled = await TW.storage.getModuleEnabled('notif-discord', false);
+    if (!enabled && !force) return { ok: false, reason: 'módulo de notificações desligado' };
+    const s = await TW.storage.getModuleSettings('notif-discord', {});
+    if (!force) {
+      if (kind === 'attack' && s.enableAttackAlert === false) return { ok: false };
+      if (kind === 'captcha' && s.enableCaptchaAlert === false) return { ok: false };
+    }
+    const g = gd();
+    const tag = g && g.player ? `[${g.world} · ${g.player.name}] ` : '';
+    const message = tag + text;
+    const jobs = [];
+    if (s.webhookUrl) {
+      jobs.push(gmRequest({
+        method: 'POST', url: s.webhookUrl, headers: { 'Content-Type': 'application/json' },
+        data: JSON.stringify({ content: message, username: 'TW Suite' }),
+      }));
+    }
+    if (s.whatsappPhone && s.whatsappApiKey) {
+      const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(s.whatsappPhone)}&text=${encodeURIComponent(message)}&apikey=${encodeURIComponent(s.whatsappApiKey)}`;
+      jobs.push(gmRequest({ method: 'GET', url }));
+    }
+    if (!jobs.length) return { ok: false, reason: 'nenhum canal configurado' };
+    const results = await Promise.allSettled(jobs);
+    return { ok: results.some((r) => r.status === 'fulfilled') };
+  }
+
+  // ---------- loops com trava entre abas ----------
+  async function acquireLock(name, ttlMs) {
+    const key = `lock:${name}`;
+    const cur = await TW.storage.get(key, null);
+    const now = Date.now();
+    if (cur && cur.tab !== TAB_ID && cur.until > now) return false;
+    await TW.storage.set(key, { tab: TAB_ID, until: now + ttlMs });
+    return true;
+  }
+
+  function loop(name, fn, minMs, maxMs) {
+    let stopped = false;
+    const run = async () => {
+      if (stopped || botState.active) return;
+      const delay = jitter(minMs, maxMs);
+      try {
+        if (await acquireLock(name, delay + 20000) && await guard()) await fn();
+      } catch (e) {
+        if (!(e instanceof BotCheckError)) TW.log.error(`[${name}] erro no ciclo:`, e);
+      }
+      if (!stopped && !botState.active) setTimeout(run, delay);
+    };
+    setTimeout(run, jitter(1500, 4000));
+    return () => { stopped = true; };
+  }
+
+  // ---------- UI: painel lateral único com cartões ----------
+  function h(tag, props = {}, children = []) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+      else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
+      else if (k === 'text') el.textContent = v;
+      else if (v !== undefined && v !== null && v !== false) el.setAttribute(k, v === true ? '' : v);
+    }
+    for (const c of [].concat(children)) {
+      if (c == null || c === false) continue;
+      el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    }
+    return el;
+  }
+
+  function dockEl() {
+    let dock = document.getElementById('twsuite-dock');
+    if (dock) return dock;
+    const style = h('style', { text: `
+      #twsuite-dock{position:fixed;left:10px;top:110px;width:290px;max-height:calc(100vh - 130px);overflow-y:auto;z-index:99990;display:flex;flex-direction:column;gap:8px;font:11px Verdana,Arial,sans-serif;color:#1a1a1a}
+      .tws-card{background:#f4e4bc;border:2px solid #7a5230;border-radius:6px;box-shadow:0 3px 10px rgba(0,0,0,.35)}
+      .tws-head{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:6px 8px;background:#c1a264;cursor:pointer;font-weight:bold;border-radius:4px 4px 0 0}
+      .tws-card.collapsed .tws-body{display:none}
+      .tws-card.collapsed .tws-head{border-radius:4px}
+      .tws-status{font-weight:normal;font-size:10px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+      .tws-body{padding:8px;display:flex;flex-direction:column;gap:6px}
+      .tws-row{display:flex;align-items:center;justify-content:space-between;gap:6px}
+      .tws-body input[type=text],.tws-body input[type=number],.tws-body select,.tws-body textarea{font-size:11px;padding:2px 4px;box-sizing:border-box}
+      .tws-body button{font-size:11px;cursor:pointer}
+      .tws-list{max-height:180px;overflow-y:auto;border-top:1px solid #c1a264;padding-top:4px}
+      .tws-muted{opacity:.7;font-size:10px}
+      .tws-test{color:#8a4b00;font-weight:bold}
+    ` });
+    document.head.appendChild(style);
+    dock = h('div', { id: 'twsuite-dock' });
+    document.body.appendChild(dock);
+    return dock;
+  }
+
+  function card(id, title) {
+    const existing = document.getElementById(`tws-card-${id}`);
+    if (existing) existing.remove();
+    const status = h('span', { class: 'tws-status' });
+    const body = h('div', { class: 'tws-body' });
+    const head = h('div', { class: 'tws-head' }, [h('span', { text: title }), status]);
+    const el = h('div', { class: 'tws-card', id: `tws-card-${id}` }, [head, body]);
+    const key = `twsuite-collapsed:${id}`;
+    try { if (localStorage.getItem(key) === '1') el.classList.add('collapsed'); } catch { /* sem storage */ }
+    head.addEventListener('click', () => {
+      el.classList.toggle('collapsed');
+      try { localStorage.setItem(key, el.classList.contains('collapsed') ? '1' : '0'); } catch { /* sem storage */ }
+    });
+    dockEl().appendChild(el);
+    return {
+      el,
+      body,
+      setStatus(text) { status.textContent = text; status.title = text; },
+    };
+  }
+
+  function parseUnitList(value) {
+    if (Array.isArray(value)) return value;
+    return String(value || '').split(/[\s,;]+/).map((s) => s.trim()).filter((s) => UNITS.includes(s));
+  }
+
+  // ---------- status ao vivo (usado pelo core pra reportar ao dashboard) ----------
+  // UNVERIFIED: screen=info_command é a tela padrão de "Visão geral de comandos"
+  // do Tribal Wars clássico; formato exato da tabela nunca confirmado ao vivo
+  // neste mundo. Falha aqui não deve quebrar o resto do snapshot.
+  async function getIncomingAttacks(vid) {
+    try {
+      const { doc } = await getPage(`/game.php?village=${vid}&screen=info_command&type=incomings&mode=incomings`);
+      const rows = [...doc.querySelectorAll('#commands_incomings tr, .quickbar-active tr, table.command-table tr')]
+        .filter((tr) => tr.querySelector('.relative_time, [data-duration]'));
+      const out = [];
+      for (const tr of rows) {
+        const durEl = tr.querySelector('.relative_time[data-duration], [data-duration]');
+        const originEl = tr.querySelector('a[href*="info_village"]');
+        const isAttack = /att|nuke|spear|sword|axe/i.test(tr.className) || !!tr.querySelector('img[src*="att"]');
+        if (!durEl) continue;
+        out.push({
+          etaMs: Number(durEl.getAttribute('data-duration')) * 1000,
+          origin: originEl ? originEl.textContent.trim() : null,
+          kind: isAttack ? 'attack' : 'other',
+        });
+      }
+      out.sort((a, b) => a.etaMs - b.etaMs);
+      return out;
+    } catch (e) {
+      if (e instanceof BotCheckError) throw e;
+      return null; // tela pode não existir/mudar de nome — não derruba o snapshot
+    }
+  }
+
+  async function troopsHome(vid) {
+    try {
+      const doc = await getPlaceDoc(vid);
+      return availableUnits(doc);
+    } catch {
+      return null;
+    }
+  }
+
+  async function buildLiveSnapshot() {
+    const g = gd();
+    if (!g || !g.village) return null;
+    const vid = g.village.id;
+    const [troops, incoming] = await Promise.all([
+      troopsHome(vid).catch(() => null),
+      getIncomingAttacks(vid).catch(() => null),
+    ]);
+    return {
+      at: Date.now(),
+      village: { id: vid, name: g.village.name, x: g.village.x, y: g.village.y },
+      resources: { wood: Math.floor(g.village.wood), stone: Math.floor(g.village.stone), iron: Math.floor(g.village.iron), storageMax: g.village.storage_max },
+      points: g.player ? Number(g.player.points) : null,
+      villages: g.player ? Number(g.player.villages) : null,
+      troops,
+      incoming: incoming ? incoming.slice(0, 5) : null,
+      incomingAttacks: incoming ? incoming.filter((c) => c.kind === 'attack').length : null,
+    };
+  }
+
+  TW.shared = {
+    TAB_ID, pageWin, UNITS, UNIT_LABELS, RESOURCES, RES_LABELS, BotCheckError,
+    sleep, jitter, gd, csrf, villageId, dist, num, parseHtml, gameDataFromHtml, formParams,
+    getPage, postForm, ajax, errorFromHtml, guard, pageHasBotCheck, flagBotCheck, botState,
+    prepareCommand, confirmCommand, sendCommand, availableUnits, listCancelableCommands, cancelLinks, cancelCommand,
+    sendResources, getVillageIndex, myVillages, parseGameTime, formatServerTime, serverWallOffsetMs, worldConfig,
+    notify, acquireLock, loop, h, card, parseUnitList, getIncomingAttacks, troopsHome, buildLiveSnapshot,
+  };
+})();
+
+// ============================================================
+// MÓDULO INTERNO: live-status — snapshot ao vivo pro dashboard
+//
+// Sempre ativo (não aparece nem precisa ser ligado no dashboard).
+// A cada ~75s junta recursos/tropas/ataques a caminho (buildLiveSnapshot,
+// em shared.js) e guarda em storage:'accounts', a mesma estrutura que o
+// core já expõe pra ponte do dashboard (profiles.reportStatus/bridge
+//'pull'). O dashboard lê isso e mostra sem precisar de ação manual.
+// ============================================================
+(function registerLiveStatus() {
+  'use strict';
+  const TW = window.TWSuite;
+  const S = TW.shared;
+
+  TW.registerModule({
+    id: 'live-status',
+    name: 'Status ao Vivo (interno)',
+    screens: ['any'],
+    defaultEnabled: true,
+    async run(ctx) {
+      S.loop('live-status', async () => {
+        const snap = await S.buildLiveSnapshot();
+        if (!snap) return;
+        const key = TW.accountKeyFromGame && TW.accountKeyFromGame();
+        if (!key) return;
+        const accounts = (await ctx.storage.get('accounts', {})) || {};
+        accounts[key] = { ...(accounts[key] || {}), ...snap, lastSeen: Date.now() };
+        await ctx.storage.set('accounts', accounts);
+      }, 60000, 95000);
+    },
+  });
 })();
 
 // ============================================================
@@ -1181,566 +1838,476 @@
       }
 
       await renderAll();
+
+      // Live-refresh: se o dashboard mudar os modelos de tropas desta
+      // conta enquanto a página está aberta, TWSuite.storage.set('profiles', ...)
+      // muda — reaplicamos o perfil (window.TWSuite.applyProfileNow, ver core)
+      // e, se os modelos realmente mudaram, re-renderizamos sem precisar
+      // recarregar a página.
+      setInterval(async () => {
+        if (typeof window.TWSuite.applyProfileNow === 'function') {
+          await window.TWSuite.applyProfileNow();
+        }
+        const fresh = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+        if (JSON.stringify(fresh.templates) !== JSON.stringify(settings.templates) || fresh.activeTemplateId !== settings.activeTemplateId) {
+          settings = fresh;
+          log.info('Modelos de tropas atualizados a partir do dashboard.');
+          renderAll();
+        }
+      }, 8000);
     },
   });
 })();
 
 // ============================================================
-// MÓDULO: agendador-de-comandos (Fase 2)
+// MÓDULO: scheduler — Agendador de Comandos (reescrito v1.2.0)
 //
-// Fila de ataques agendados pra múltiplos horários. Sincroniza
-// com o relógio do servidor (via serverTime) pra precisão.
-// Persiste a fila no storage — sobrevive a refresh/logout.
+// Bug da v0.7.0: só rodava na tela `place`, e o disparo dependia de
+// estar exatamente na tela de confirmação (`try=confirm`) no segundo
+// certo — impraticável (exigia deixar a aba parada naquela tela
+// específica). Reescrito para rodar em `screens: ['any']` e disparar
+// via `shared.sendCommand()` (fetch real, dois POSTs), igual ao Auto
+// Farm — não depende de qual tela está aberta nem de clique.
 //
-// Painel mostra fila de ataques pendentes + interface pra
-// adicionar novos. Cada ataque na fila é executado no horário
-// certo via setTimeout usando serverTime.now().
+// Dois modos:
+//  - "Chegar às": mede a duração UMA vez (prepareCommand é
+//    side-effect-free — não gasta tropa, só resolve o alvo) e calcula
+//    o horário de envio subtraindo a duração.
+//  - "Enviar às": dispara no horário exato, sem calcular chegada.
 //
-// Tela de confirmação (place&try=confirm): painel permite
-// agendar um novo ataque (detecta automaticamente alvo/duração).
-// Qualquer outra tela: mostra fila global + executa ataques.
+// Correção adaptativa: guarda a média móvel do tempo de ida-e-volta
+// da 2ª requisição (confirmCommand) e antecipa o disparo por metade
+// desse valor, pra compensar a latência de rede — mesma ideia que
+// os concorrentes anunciam como "calibração automática", sem
+// prometer precisão de milissegundo que não dá pra garantir aqui.
 // ============================================================
-(function registerSchedulerModule() {
+(function registerScheduler() {
   'use strict';
-
+  const TW = window.TWSuite;
+  const S = TW.shared;
   const MODULE_ID = 'scheduler';
-  const PANEL_ID = 'twsuite-scheduler-panel';
-  const STORAGE_KEY = 'scheduler:queue';
+  const QUEUE_KEY = 'scheduler:queue';
+  const LATENCY_KEY = 'scheduler:avgLatencyMs';
 
-  function getTravelDuration() {
-    const bodyText = document.body.innerText;
-    const match = bodyText.match(/Duração:\s*(\d+):(\d+):(\d+)/i) || bodyText.match(/Duration:\s*(\d+):(\d+):(\d+)/i);
-    if (match) {
-      const hours = parseInt(match[1], 10);
-      const minutes = parseInt(match[2], 10);
-      const seconds = parseInt(match[3], 10);
-      return (hours * 3600 + minutes * 60 + seconds) * 1000;
-    }
-    return null;
+  const queueLoad = () => TW.storage.get(QUEUE_KEY, []);
+  const queueSave = (q) => TW.storage.set(QUEUE_KEY, q);
+
+  async function getLatency() {
+    return Number(await TW.storage.get(LATENCY_KEY, 400));
+  }
+  async function updateLatency(sampleMs) {
+    const prev = await getLatency();
+    const next = Math.round(prev * 0.7 + sampleMs * 0.3);
+    await TW.storage.set(LATENCY_KEY, Math.min(3000, Math.max(50, next)));
   }
 
-  function getTargetCoords() {
-    const params = new URLSearchParams(window.location.search);
-    const targetParam = params.get('target');
-    if (!targetParam) return null;
-    const bodyText = document.body.innerText;
-    // Procura por "X|Y" na página
-    const match = bodyText.match(/(\d+)\s*\|\s*(\d+)/);
-    if (match) {
-      return { x: parseInt(match[1], 10), y: parseInt(match[2], 10) };
-    }
-    return null;
+  function fmtEta(ms) {
+    if (ms <= 0) return 'agora';
+    const s = Math.floor(ms / 1000);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`;
   }
 
-  async function loadQueue(storage) {
-    const data = await storage.get(STORAGE_KEY, '[]');
+  async function addItem(item) {
+    const q = await queueLoad();
+    q.push(item);
+    await queueSave(q);
+    return q;
+  }
+
+  async function removeItem(id) {
+    const q = (await queueLoad()).filter((i) => i.id !== id);
+    await queueSave(q);
+    return q;
+  }
+
+  async function updateItem(id, patch) {
+    const q = await queueLoad();
+    const idx = q.findIndex((i) => i.id === id);
+    if (idx >= 0) q[idx] = { ...q[idx], ...patch };
+    await queueSave(q);
+    return q;
+  }
+
+  async function executeItem(item, log, refresh) {
+    const lockName = `scheduler:${item.id}`;
+    if (!(await S.acquireLock(lockName, 60000))) return;
+    await updateItem(item.id, { status: 'sending' });
+    refresh();
+
+    const latency = await getLatency();
+    // Se ainda faltar um pouquinho pro instante exato, espera aqui
+    // (scheduleAt já fez a espera grossa; isso cobre o resto fino).
+    const remaining = item.sendAtMs - latency / 2 - S.serverTime.now();
+    if (remaining > 0) await S.sleep(remaining);
+
     try {
-      return JSON.parse(data);
-    } catch {
-      return [];
-    }
-  }
-
-  async function saveQueue(storage, queue) {
-    await storage.set(STORAGE_KEY, JSON.stringify(queue));
-  }
-
-  function buildMainPanel(queue, storage, log, serverTime) {
-    const panel = document.createElement('div');
-    panel.id = PANEL_ID;
-    Object.assign(panel.style, {
-      position: 'fixed',
-      top: '60px',
-      left: '16px',
-      width: '320px',
-      maxHeight: '70vh',
-      overflowY: 'auto',
-      background: '#f4e4bc',
-      border: '2px solid #7a5230',
-      borderRadius: '6px',
-      padding: '10px',
-      zIndex: 99998,
-      fontSize: '11px',
-      color: '#1a1a1a',
-      fontFamily: 'Verdana, Arial, sans-serif',
-      boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
-    });
-
-    const title = document.createElement('div');
-    title.style.fontWeight = 'bold';
-    title.style.marginBottom = '6px';
-    title.textContent = 'Agendador de Comandos';
-    panel.appendChild(title);
-
-    const queueTitle = document.createElement('div');
-    queueTitle.style.fontWeight = 'bold';
-    queueTitle.style.marginTop = '8px';
-    queueTitle.style.marginBottom = '4px';
-    queueTitle.style.fontSize = '10px';
-    queueTitle.textContent = `Fila: ${queue.length} ataques`;
-    panel.appendChild(queueTitle);
-
-    const listEl = document.createElement('div');
-    listEl.style.maxHeight = '300px';
-    listEl.style.overflowY = 'auto';
-    listEl.style.marginBottom = '8px';
-    listEl.style.borderBottom = '1px solid #7a5230';
-    listEl.style.paddingBottom = '8px';
-
-    if (queue.length === 0) {
-      listEl.textContent = '(nenhum ataque agendado)';
-    } else {
-      for (let i = 0; i < queue.length; i++) {
-        const attack = queue[i];
-        const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.justifyContent = 'space-between';
-        row.style.alignItems = 'center';
-        row.style.marginBottom = '3px';
-        row.style.fontSize = '10px';
-        row.style.padding = '3px';
-        row.style.background = '#e8d4a0';
-        row.style.borderRadius = '3px';
-
-        const label = document.createElement('span');
-        label.textContent = `${attack.x}|${attack.y} @ ${attack.arrivalTime}`;
-        row.appendChild(label);
-
-        const removeBtn = document.createElement('button');
-        removeBtn.textContent = '✕';
-        removeBtn.style.fontSize = '9px';
-        removeBtn.style.padding = '0 4px';
-        removeBtn.style.width = '24px';
-        removeBtn.addEventListener('click', async () => {
-          queue.splice(i, 1);
-          await saveQueue(storage, queue);
-          panel.remove();
-          renderScheduler(queue, storage, log, serverTime);
-        });
-        row.appendChild(removeBtn);
-        listEl.appendChild(row);
-      }
-    }
-    panel.appendChild(listEl);
-
-    const clearBtn = document.createElement('button');
-    clearBtn.textContent = 'Limpar fila';
-    clearBtn.style.fontSize = '10px';
-    clearBtn.style.width = '100%';
-    clearBtn.style.marginBottom = '4px';
-    clearBtn.addEventListener('click', async () => {
-      await saveQueue(storage, []);
-      log.info('Fila de ataques limpa.');
-      panel.remove();
-      renderScheduler([], storage, log, serverTime);
-    });
-    panel.appendChild(clearBtn);
-
-    // Status de execução
-    const statusEl = document.createElement('div');
-    statusEl.style.fontSize = '10px';
-    statusEl.style.color = '#555';
-    statusEl.style.marginTop = '4px';
-    statusEl.textContent = `Sincronizado: ${new Date(serverTime.now()).toLocaleTimeString()}`;
-    panel.appendChild(statusEl);
-
-    return panel;
-  }
-
-  function buildConfirmPanel(storage, log, serverTime) {
-    const panel = document.createElement('div');
-    panel.id = PANEL_ID;
-    Object.assign(panel.style, {
-      position: 'fixed',
-      top: '60px',
-      left: '16px',
-      width: '280px',
-      background: '#f4e4bc',
-      border: '2px solid #7a5230',
-      borderRadius: '6px',
-      padding: '10px',
-      zIndex: 99998,
-      fontSize: '11px',
-      color: '#1a1a1a',
-      fontFamily: 'Verdana, Arial, sans-serif',
-      boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
-    });
-
-    const title = document.createElement('div');
-    title.style.fontWeight = 'bold';
-    title.style.marginBottom = '6px';
-    title.textContent = 'Agendar Novo Ataque';
-    panel.appendChild(title);
-
-    const travelDurationMs = getTravelDuration();
-    const targetCoords = getTargetCoords();
-
-    if (!travelDurationMs || !targetCoords) {
-      panel.textContent = 'Erro: duração ou alvo não detectados.';
-      return panel;
-    }
-
-    const durationMin = Math.floor(travelDurationMs / 60000);
-    const durationSec = Math.floor((travelDurationMs % 60000) / 1000);
-
-    const infoLabel = document.createElement('div');
-    infoLabel.style.marginBottom = '4px';
-    infoLabel.style.fontSize = '10px';
-    infoLabel.innerHTML = `<strong>Alvo:</strong> ${targetCoords.x}|${targetCoords.y}<br/><strong>Duração:</strong> ${durationMin}:${String(durationSec).padStart(2, '0')}`;
-    panel.appendChild(infoLabel);
-
-    const timeInput = document.createElement('input');
-    timeInput.type = 'time';
-    timeInput.style.width = '100%';
-    timeInput.style.marginBottom = '4px';
-    timeInput.style.boxSizing = 'border-box';
-    timeInput.title = 'Horário desejado de chegada';
-    panel.appendChild(timeInput);
-
-    const addBtn = document.createElement('button');
-    addBtn.textContent = 'Adicionar à fila';
-    addBtn.style.fontSize = '10px';
-    addBtn.style.width = '100%';
-    addBtn.addEventListener('click', async () => {
-      const timeStr = timeInput.value;
-      if (!timeStr) {
-        log.warn('Nenhuma hora selecionada.');
-        return;
-      }
-
-      const [hours, minutes] = timeStr.split(':');
-      const queue = await loadQueue(storage);
-      queue.push({
-        x: targetCoords.x,
-        y: targetCoords.y,
-        arrivalTime: timeStr,
-        travelDurationMs,
-        createdAt: new Date().toISOString(),
+      const res = await S.sendCommand({
+        villageId: item.vid, units: item.units, x: item.x, y: item.y, type: item.type, capToAvailable: item.capToAvailable !== false,
       });
-      await saveQueue(storage, queue);
-      log.info(`Ataque agendado: ${targetCoords.x}|${targetCoords.y} @ ${timeStr}`);
-      addBtn.disabled = true;
-      addBtn.textContent = 'Adicionado!';
-    });
-    panel.appendChild(addBtn);
-
-    return panel;
-  }
-
-  async function executeScheduledAttacks(queue, storage, log, serverTime) {
-    // Remove ataques já passados e dispara os que chegaram no horário
-    const now = serverTime.now();
-    const toExecute = [];
-    const remaining = [];
-
-    for (const attack of queue) {
-      const [hours, minutes] = attack.arrivalTime.split(':');
-      const targetSeconds = parseInt(hours, 10) * 3600 + parseInt(minutes, 10) * 60;
-      const travelSeconds = Math.floor(attack.travelDurationMs / 1000);
-      const sendSeconds = targetSeconds - travelSeconds;
-
-      // Converter segundos do dia pra timestamp (hoje)
-      const todayMs = new Date().getTime();
-      const today = new Date(todayMs);
-      today.setHours(0, 0, 0, 0);
-      const sendTimeMs = today.getTime() + sendSeconds * 1000;
-
-      if (sendTimeMs <= now) {
-        toExecute.push(attack);
+      if (res.ok) {
+        await updateLatency(res.endedAt - res.startedAt);
+        log.info(`Agendado disparado: ${item.type === 'support' ? 'apoio' : 'ataque'} -> ${item.x}|${item.y} (previsto ${S.formatServerTime(item.sendAtMs)}, real ${S.formatServerTime(res.sentAt)}).`);
+        await S.notify(`✅ Comando agendado enviado: ${item.x}|${item.y}${item.label ? ` (${item.label})` : ''}`);
+        await removeItem(item.id);
       } else {
-        remaining.push(attack);
+        log.error(`Falha ao disparar agendado ${item.x}|${item.y}:`, res.reason);
+        await S.notify(`⚠️ Falha no comando agendado ${item.x}|${item.y}: ${res.reason}`);
+        await updateItem(item.id, { status: 'failed', error: res.reason });
+      }
+    } catch (e) {
+      if (e instanceof S.BotCheckError) {
+        await updateItem(item.id, { status: 'pending' }); // tenta de novo depois que o captcha for resolvido
+      } else {
+        log.error(`Erro inesperado no agendado ${item.x}|${item.y}:`, e);
+        await updateItem(item.id, { status: 'failed', error: String(e && e.message || e) });
       }
     }
+    refresh();
+  }
 
-    // Salvar fila atualizada
-    await saveQueue(storage, remaining);
-
-    // Executar ataques (click no botão)
-    for (const attack of toExecute) {
-      const confirmBtn = document.querySelector('#troop_confirm_submit');
-      if (confirmBtn) {
-        log.info(`Auto-enviando agendado: ${attack.x}|${attack.y}`);
-        confirmBtn.click();
-      } else {
-        log.warn(`Não consegui clicar no botão pra ${attack.x}|${attack.y} — talvez não esteja na tela de confirmação.`);
+  function scheduleTick(state, log, refresh) {
+    (async () => {
+      const q = await queueLoad();
+      const now = S.serverTime.now();
+      for (const item of q) {
+        if (item.status !== 'pending') continue;
+        if (item.sendAtMs - now <= 5000 && !state.armed.has(item.id)) {
+          state.armed.add(item.id);
+          S.serverTime.scheduleAt(item.sendAtMs, () => {
+            state.armed.delete(item.id);
+            executeItem(item, log, refresh);
+          });
+        }
       }
-    }
+    })();
   }
 
-  async function renderScheduler(queue, storage, log, serverTime) {
-    const params = new URLSearchParams(window.location.search);
-    const isTryConfirm = params.get('try') === 'confirm';
-
-    let panel;
-    if (isTryConfirm) {
-      panel = buildConfirmPanel(storage, log, serverTime);
-    } else {
-      panel = buildMainPanel(queue, storage, log, serverTime);
+  function renderList(body, state, log, refresh) {
+    body.innerHTML = '';
+    if (!state.queue.length) {
+      body.appendChild(S.h('div', { class: 'tws-muted', text: 'Fila vazia.' }));
+      return;
     }
-
-    document.body.appendChild(panel);
+    const list = S.h('div', { class: 'tws-list' });
+    for (const item of state.queue.slice().sort((a, b) => a.sendAtMs - b.sendAtMs)) {
+      const eta = item.sendAtMs - S.serverTime.now();
+      const statusTxt = item.status === 'sending' ? 'enviando…' : item.status === 'failed' ? `falhou: ${item.error || ''}` : fmtEta(eta);
+      const row = S.h('div', { class: 'tws-row', style: { borderBottom: '1px solid #c1a264', paddingBottom: '4px', marginBottom: '4px' } }, [
+        S.h('span', { text: `${item.type === 'support' ? '🛡' : '⚔'} ${item.x}|${item.y} · ${item.modeLabel} ${statusTxt}` }),
+        S.h('button', { text: '✕', onclick: async () => { state.queue = await removeItem(item.id); renderList(body, state, log, refresh); } }),
+      ]);
+      list.appendChild(row);
+    }
+    body.appendChild(list);
   }
 
-  window.TWSuite.registerModule({
+  function unitGrid(values) {
+    const wraps = {};
+    const grid = S.h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px' } });
+    for (const u of S.UNITS) {
+      const input = S.h('input', { type: 'text', placeholder: '0 ou tudo', value: values[u] != null ? String(values[u]) : '', style: { width: '100%' } });
+      wraps[u] = input;
+      grid.appendChild(S.h('label', { style: { fontSize: '10px', display: 'flex', flexDirection: 'column', gap: '1px' } }, [S.UNIT_LABELS[u], input]));
+    }
+    return { grid, read: () => { const o = {}; for (const u of S.UNITS) { const v = wraps[u].value.trim().toLowerCase(); if (v === 'tudo' || v === 'all') o[u] = 'all'; else if (v) o[u] = Number(v) || 0; } return o; } };
+  }
+
+  TW.registerModule({
     id: MODULE_ID,
     name: 'Agendador de Comandos',
-    screens: ['place'],
+    screens: ['any'],
     defaultEnabled: false,
-
     async run(ctx) {
-      const { storage, log, serverTime } = ctx;
+      const { log } = ctx;
+      const state = { queue: await queueLoad(), armed: new Set() };
+      const ui = S.card(MODULE_ID, 'Agendador');
+      const listBody = S.h('div');
+      const refresh = () => { renderList(listBody, state, log, refresh); ui.setStatus(`${state.queue.filter((i) => i.status !== 'failed').length} na fila`); };
 
-      // Carregar fila
-      const queue = await loadQueue(storage);
+      const villages = await S.myVillages();
+      const villageSelect = S.h('select', {}, villages.length
+        ? villages.map((v) => S.h('option', { value: v.id }, `${v.name} (${v.x}|${v.y})`))
+        : [S.h('option', { value: S.villageId() || '' }, 'Aldeia atual')]);
+      if (S.villageId()) villageSelect.value = String(S.villageId());
 
-      // Renderizar painel (confirmação ou global)
-      await renderScheduler(queue, storage, log, serverTime);
+      const xInput = S.h('input', { type: 'number', placeholder: 'X', style: { width: '50%' } });
+      const yInput = S.h('input', { type: 'number', placeholder: 'Y', style: { width: '50%' } });
+      const typeSelect = S.h('select', {}, [S.h('option', { value: 'attack' }, 'Ataque'), S.h('option', { value: 'support' }, 'Apoio')]);
+      const modeSelect = S.h('select', {}, [S.h('option', { value: 'arrival' }, 'Chegar às'), S.h('option', { value: 'send' }, 'Enviar às')]);
+      const timeInput = S.h('input', { type: 'text', placeholder: 'HH:MM:SS ou 17/09 21:14:59', style: { width: '100%' } });
+      const labelInput = S.h('input', { type: 'text', placeholder: 'Etiqueta (opcional)', style: { width: '100%' } });
+      const { grid: unitsGrid, read: readUnits } = unitGrid({});
+      const addStatus = S.h('div', { class: 'tws-muted' });
+      const addBtn = S.h('button', { text: '+ Agendar', style: { width: '100%' } });
 
-      // Executar ataques que chegaram no horário (se não estiver na tela de confirmação)
-      const params = new URLSearchParams(window.location.search);
-      const isTryConfirm = params.get('try') === 'confirm';
-      if (!isTryConfirm && queue.length > 0) {
-        await executeScheduledAttacks(queue, storage, log, serverTime);
-      }
+      addBtn.addEventListener('click', async () => {
+        addStatus.textContent = 'calculando...';
+        addBtn.disabled = true;
+        try {
+          const x = Number(xInput.value);
+          const y = Number(yInput.value);
+          const vid = villageSelect.value;
+          const type = typeSelect.value;
+          const mode = modeSelect.value;
+          const units = readUnits();
+          if (!x || !y) throw new Error('informe X e Y do alvo');
+          if (!Object.keys(units).length) throw new Error('informe ao menos 1 tropa');
+          const targetMs = S.parseGameTime(timeInput.value);
+          if (!targetMs) throw new Error('não entendi o horário — use HH:MM:SS');
 
-      // Polling contínuo pra executar ataques na hora (a cada 500ms)
-      if (!isTryConfirm) {
-        const pollInterval = setInterval(async () => {
-          const updatedQueue = await loadQueue(storage);
-          if (updatedQueue.length > 0) {
-            await executeScheduledAttacks(updatedQueue, storage, log, serverTime);
+          let sendAtMs = targetMs;
+          if (mode === 'arrival') {
+            const prep = await S.prepareCommand({ villageId: vid, units, x, y, type });
+            if (!prep.ok) throw new Error(prep.reason);
+            if (!prep.durationMs) throw new Error('não consegui ler a duração da viagem');
+            sendAtMs = targetMs - prep.durationMs;
           }
-        }, 500);
-      }
+          if (sendAtMs < S.serverTime.now()) throw new Error('esse horário já passou (considerando a duração da viagem)');
 
-      log.info('Agendador de Comandos carregado.');
+          state.queue = await addItem({
+            id: 'sch_' + Math.random().toString(36).slice(2, 10),
+            vid, x, y, type, units, sendAtMs, capToAvailable: true,
+            modeLabel: mode === 'arrival' ? `chegando ${timeInput.value}` : `enviando ${timeInput.value}`,
+            label: labelInput.value.trim() || null,
+            status: 'pending', createdAt: Date.now(),
+          });
+          addStatus.textContent = `agendado para ${S.formatServerTime(sendAtMs, false)}`;
+          refresh();
+        } catch (e) {
+          addStatus.textContent = `erro: ${e.message}`;
+        }
+        addBtn.disabled = false;
+      });
+
+      ui.body.appendChild(S.h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } }, [
+        S.h('label', { class: 'tws-muted' }, ['Aldeia de origem', villageSelect]),
+        S.h('div', { class: 'tws-row' }, [xInput, yInput]),
+        S.h('div', { class: 'tws-row' }, [typeSelect, modeSelect]),
+        timeInput,
+        unitsGrid,
+        labelInput,
+        addBtn,
+        addStatus,
+      ]));
+      ui.body.appendChild(S.h('div', { style: { fontWeight: 'bold', fontSize: '10px', marginTop: '4px' }, text: 'Fila' }));
+      ui.body.appendChild(listBody);
+
+      refresh();
+      const tick = () => { scheduleTick(state, log, refresh); refresh(); };
+      tick();
+      setInterval(async () => { state.queue = await queueLoad(); tick(); }, 4000);
+
+      log.info('Agendador de Comandos carregado (v1.2.0 — independente de tela).');
     },
   });
 })();
 
 // ============================================================
-// MÓDULO: auto-recrutamento (Fase 3)
+// MÓDULO: auto-recruit — Recrutamento automático sem estourar recursos
 //
-// Recruta tropas automaticamente na tela de treinamento
-// (screen=train). Preenche os campos de quantidade e clica
-// no botão de treinar. Loop contínuo enquanto ativo.
+// Envia via ajaxaction=train no edifício certo (quartel/estábulo/oficina),
+// mantendo uma reserva % do armazém para as outras filas. Relê a
+// configuração a cada ciclo (não só uma vez no carregamento) — assim
+// uma mudança feita no dashboard chega no próximo ciclo, sem precisar
+// recarregar a página.
+// UNVERIFIED: ids #<unidade>_0_cost_<recurso> / #<unidade>_0_a no HTML.
 // ============================================================
-(function registerAutoRecruitModule() {
+(function registerAutoRecruit() {
   'use strict';
-
+  const TW = window.TWSuite;
+  const S = TW.shared;
   const MODULE_ID = 'auto-recruit';
-  const PANEL_ID = 'twsuite-recruit-panel';
-
-  const UNIT_FIELDS = ['spear', 'sword', 'axe', 'archer', 'spy', 'light', 'marcher', 'heavy', 'ram', 'catapult', 'knight', 'snob'];
-  const UNIT_LABELS = {
-    spear: 'Lanceiro', sword: 'Espadachim', axe: 'Bárbaro', archer: 'Arqueiro',
-    spy: 'Explorador', light: 'Cavalaria leve', marcher: 'Arqueiro a cavalo',
-    heavy: 'Cavalaria pesada', ram: 'Aríete', catapult: 'Catapulta', knight: 'Paladino', snob: 'Nobre',
+  const DEFAULTS = { unit: 'light', amount: 10, interval: 30000, reservePercent: 20, maxQueueOrders: 2, dryRun: true };
+  const BUILDING = {
+    spear: 'barracks', sword: 'barracks', axe: 'barracks', archer: 'barracks',
+    spy: 'stable', light: 'stable', marcher: 'stable', heavy: 'stable',
+    ram: 'garage', catapult: 'garage',
   };
 
-  const DEFAULT_SETTINGS = {
-    enabled: false,
-    unit: 'light',
-    amount: 10,
-    interval: 5000, // ms entre recrutas
-    dryRun: true,
-  };
-
-  async function recruit(unit, amount, log) {
-    // Procura pelos campos de entrada e botão de treinar
-    const unitInput = document.querySelector(`input[name="${unit}"]`) || document.querySelector(`#${unit}`);
-    const trainBtn = document.querySelector('button[name="train"]') || document.querySelector('input[type="submit"][value*="Treinar"]');
-
-    if (!unitInput || !trainBtn) {
-      return { ok: false, reason: 'Campos de treinamento não encontrados' };
+  function readCosts(doc, unit) {
+    const out = {};
+    for (const r of S.RESOURCES) {
+      const el = doc.querySelector(`#${unit}_0_cost_${r}`);
+      out[r] = el ? S.num(el.textContent) : null;
     }
-
-    unitInput.value = String(amount);
-    unitInput.dispatchEvent(new Event('input', { bubbles: true }));
-    unitInput.dispatchEvent(new Event('change', { bubbles: true }));
-
-    trainBtn.click();
-    return { ok: true };
+    return out;
   }
 
-  window.TWSuite.registerModule({
+  function readMaxAffordable(doc, unit) {
+    const a = doc.querySelector(`#${unit}_0_a`);
+    const m = a && a.textContent.match(/\((\d+)\)/);
+    return m ? Number(m[1]) : null;
+  }
+
+  TW.registerModule({
     id: MODULE_ID,
-    name: 'Auto Recrutamento',
-    screens: ['train'],
+    name: 'Recrutamento Automático',
+    screens: ['any'],
     defaultEnabled: false,
-
     async run(ctx) {
-      const { storage, log } = ctx;
-      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+      const ui = S.card(MODULE_ID, 'Recrutamento');
 
-      if (!settings.enabled) return;
+      S.loop(`${MODULE_ID}:${S.villageId()}`, async () => {
+        const s = await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS);
+        const building = BUILDING[s.unit];
+        if (!building) return ui.setStatus('unidade inválida na configuração');
 
-      const panel = document.createElement('div');
-      panel.id = PANEL_ID;
-      Object.assign(panel.style, {
-        position: 'fixed', top: '60px', left: '16px', width: '280px',
-        background: '#f4e4bc', border: '2px solid #7a5230', borderRadius: '6px',
-        padding: '10px', zIndex: 99998, fontSize: '11px', color: '#1a1a1a',
-        fontFamily: 'Verdana, Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
-      });
+        const vid = S.villageId();
+        const page = await S.getPage(`/game.php?village=${vid}&screen=${building}`);
+        const g = S.gameDataFromHtml(page.text) || S.gd();
+        const orders = (page.text.match(/TrainOverview\.cancelOrder\(\d+\)/g) || []).length;
+        if (orders >= s.maxQueueOrders) return ui.setStatus(`fila cheia (${orders}) · ${s.amount}× ${S.UNIT_LABELS[s.unit]}`);
 
-      const title = document.createElement('div');
-      title.style.fontWeight = 'bold';
-      title.style.marginBottom = '6px';
-      title.textContent = 'Auto Recrutamento';
-      panel.appendChild(title);
+        const costs = readCosts(page.doc, s.unit);
+        const maxAff = readMaxAffordable(page.doc, s.unit);
+        if (maxAff === null && costs.wood === null) return ui.setStatus(`${S.UNIT_LABELS[s.unit]} indisponível nesta aldeia`);
 
-      const unitSelect = document.createElement('select');
-      for (const u of UNIT_FIELDS) {
-        const opt = document.createElement('option');
-        opt.value = u;
-        opt.textContent = UNIT_LABELS[u];
-        if (u === settings.unit) opt.selected = true;
-        unitSelect.appendChild(opt);
-      }
-      unitSelect.addEventListener('change', async () => {
-        settings.unit = unitSelect.value;
-        await storage.setModuleSettings(MODULE_ID, settings);
-      });
-
-      const amountInput = document.createElement('input');
-      amountInput.type = 'number';
-      amountInput.min = '1';
-      amountInput.value = String(settings.amount);
-      amountInput.style.width = '60px';
-      amountInput.addEventListener('change', async () => {
-        settings.amount = Math.max(1, Number(amountInput.value) || 1);
-        await storage.setModuleSettings(MODULE_ID, settings);
-      });
-
-      const dryRunCb = document.createElement('input');
-      dryRunCb.type = 'checkbox';
-      dryRunCb.checked = settings.dryRun;
-      dryRunCb.addEventListener('change', async () => {
-        settings.dryRun = dryRunCb.checked;
-        await storage.setModuleSettings(MODULE_ID, settings);
-      });
-
-      panel.appendChild(document.createTextNode('Tropa: '));
-      panel.appendChild(unitSelect);
-      panel.appendChild(document.createElement('br'));
-      panel.appendChild(document.createTextNode('Qtd: '));
-      panel.appendChild(amountInput);
-      panel.appendChild(document.createElement('br'));
-      panel.appendChild(dryRunCb);
-      panel.appendChild(document.createTextNode(' Modo teste'));
-
-      document.body.appendChild(panel);
-
-      // Loop de recrutamento
-      const recruitLoop = setInterval(async () => {
-        if (settings.dryRun) {
-          log.info(`(teste) recrutaria ${settings.amount} ${UNIT_LABELS[settings.unit]}`);
-          return;
+        const v = g.village;
+        const reserve = Math.floor((Number(v.storage_max) || 0) * (s.reservePercent / 100));
+        let n = Number(s.amount) || 0;
+        if (costs.wood) {
+          for (const r of S.RESOURCES) {
+            if (costs[r]) n = Math.min(n, Math.floor((Number(v[r]) - reserve) / costs[r]));
+          }
         }
+        if (maxAff !== null) n = Math.min(n, maxAff);
+        if (n <= 0) return ui.setStatus(`aguardando recursos (reserva ${s.reservePercent}%)`);
 
-        const result = await recruit(settings.unit, settings.amount, log);
-        if (!result.ok) {
-          log.warn('Falha ao recrutar:', result.reason);
-        } else {
-          log.info(`Recrutado: ${settings.amount} ${UNIT_LABELS[settings.unit]}`);
+        if (s.dryRun) {
+          ctx.log.info(`(teste) recrutaria ${n} ${S.UNIT_LABELS[s.unit]} em ${building}`);
+          return ui.setStatus(`teste: recrutaria ${n} ${S.UNIT_LABELS[s.unit]}`);
         }
-      }, settings.interval);
+        const res = await S.ajax(building, 'train', { units: { [s.unit]: n } }, { mode: 'train' }, vid);
+        if (!res.ok) {
+          ctx.log.warn('Recrutamento recusado:', res.reason);
+          return ui.setStatus(`recusado: ${res.reason}`);
+        }
+        ctx.log.info(`Recrutado: ${n} ${S.UNIT_LABELS[s.unit]}`);
+        ui.setStatus(`+${n} ${S.UNIT_LABELS[s.unit]} às ${new Date().toLocaleTimeString()}`);
+      }, 25000, 35000);
     },
   });
 })();
 
 // ============================================================
-// MÓDULO: coleta-automática (Fase 3)
+// Motor de coleta (scavenge) — usado por auto-collect e mass-collect
 //
-// Coleta/desbloqueia automaticamente na tela de saque
-// (scavenge). Encontra e clica nos botões de coleta.
+// Dados: `var village = {...}` na página screen=place&mode=scavenge
+// (mesmo regex do TWB, GPL-3, só consultado como referência). Envio:
+// ajaxaction=send_squads em scavenge_api. Divisão de tropas com pesos
+// 15/6/3/2 (victorgare/tribalwars, MIT) para as opções terminarem em
+// tempos parecidos.
+// UNVERIFIED no seu mundo.
 // ============================================================
-(function registerAutoCollectModule() {
+(function registerScavengeEngine() {
   'use strict';
+  const TW = window.TWSuite;
+  const S = TW.shared;
+  const CARRY = { spear: 25, sword: 15, axe: 10, archer: 10, light: 80, marcher: 50, heavy: 50 };
+  const WEIGHTS = { 1: 15, 2: 6, 3: 3, 4: 2 };
 
-  const MODULE_ID = 'auto-collect';
-  const PANEL_ID = 'twsuite-collect-panel';
-
-  const DEFAULT_SETTINGS = {
-    enabled: false,
-    interval: 3000,
-    dryRun: true,
-  };
-
-  function findCollectButtons() {
-    // Procura por botões de coleta (variações possíveis)
-    const buttons = [];
-    document.querySelectorAll('button, input[type="submit"]').forEach((btn) => {
-      const text = (btn.textContent || btn.value || '').toLowerCase();
-      if (text.includes('coleta') || text.includes('desbloque') || text.includes('collect') || text.includes('loot')) {
-        buttons.push(btn);
-      }
-    });
-    return buttons;
+  function villageDataFrom(text) {
+    const m = text.match(/var village = (\{.+?\});\s*$/m) || text.match(/var village = (\{.+?\});/s);
+    if (!m) return null;
+    try { return JSON.parse(m[1]); } catch { return null; }
   }
 
-  window.TWSuite.registerModule({
+  async function unitsHome(vid, data) {
+    if (data && data.unit_counts_home) return data.unit_counts_home;
+    const { doc } = await S.getPage(`/game.php?village=${vid}&screen=place&mode=units&display=units`);
+    const out = {};
+    const row = doc.querySelector('#units_home tbody tr:not(:first-child)') || doc.querySelector('#units_home tr:nth-child(2)');
+    if (row) {
+      for (const td of row.querySelectorAll('td[class*="unit-item-"]')) {
+        const m = td.className.match(/unit-item-([a-z]+)/);
+        if (m) out[m[1]] = S.num(td.textContent);
+      }
+    }
+    return out;
+  }
+
+  // Retorna { sent, reason } — sent = nº de opções enviadas.
+  async function scavengeVillage(vid, settings, log) {
+    const page = await S.getPage(`/game.php?village=${vid}&screen=place&mode=scavenge`);
+    const data = villageDataFrom(page.text);
+    if (!data || !data.options) return { sent: 0, reason: 'dados de coleta não encontrados (desbloqueada nesta aldeia?)' };
+
+    const options = Object.entries(data.options).map(([id, o]) => ({ id: Number(id), locked: !!o.is_locked, busy: !!o.scavenging_squad }));
+    const unlocked = options.filter((o) => !o.locked);
+    const idle = unlocked.filter((o) => !o.busy);
+    if (!unlocked.length) return { sent: 0, reason: 'coleta bloqueada nesta aldeia' };
+    if (!idle.length) return { sent: 0, reason: 'todas as coletas em andamento' };
+    if (settings.waitAllIdle !== false && idle.length < unlocked.length) return { sent: 0, reason: 'aguardando todas as coletas voltarem' };
+
+    const exclude = new Set(S.parseUnitList(settings.excludeUnits));
+    const home = await unitsHome(vid, data);
+    const pool = {};
+    for (const u of Object.keys(CARRY)) pool[u] = exclude.has(u) ? 0 : Number(home[u] || 0);
+    if (!Object.values(pool).some((n) => n > 0)) return { sent: 0, reason: 'sem tropas em casa' };
+
+    const totalWeight = idle.reduce((acc, o) => acc + WEIGHTS[o.id], 0);
+    const payload = {};
+    let i = 0;
+    const remaining = { ...pool };
+    idle.sort((a, b) => b.id - a.id).forEach((o, idx) => {
+      const last = idx === idle.length - 1;
+      const counts = {};
+      let carry = 0;
+      for (const u of Object.keys(CARRY)) {
+        const n = last ? remaining[u] : Math.floor((pool[u] * WEIGHTS[o.id]) / totalWeight);
+        counts[u] = Math.min(n, remaining[u]);
+        remaining[u] -= counts[u];
+        carry += counts[u] * CARRY[u];
+      }
+      if (carry <= 0) return;
+      payload.squad_requests = payload.squad_requests || {};
+      payload.squad_requests[i] = {
+        village_id: vid,
+        option_id: o.id,
+        use_premium: 'false',
+        candidate_squad: { unit_counts: counts, carry_max: carry },
+      };
+      i++;
+    });
+    if (!i) return { sent: 0, reason: 'tropas insuficientes para dividir' };
+
+    if (settings.dryRun) {
+      log.info(`(teste) coleta na aldeia ${vid}:`, JSON.stringify(payload.squad_requests));
+      return { sent: i, dry: true };
+    }
+    const res = await S.ajax('scavenge_api', 'send_squads', payload, {}, vid);
+    if (!res.ok) return { sent: 0, reason: res.reason };
+    return { sent: i };
+  }
+
+  TW.shared.scavengeVillage = scavengeVillage;
+})();
+
+// ============================================================
+// MÓDULO: auto-collect — coleta na aldeia atual
+// ============================================================
+(function registerAutoCollect() {
+  'use strict';
+  const TW = window.TWSuite;
+  const S = TW.shared;
+  const MODULE_ID = 'auto-collect';
+  const DEFAULTS = { interval: 60000, excludeUnits: 'knight', waitAllIdle: true, dryRun: true };
+
+  TW.registerModule({
     id: MODULE_ID,
     name: 'Coleta Automática',
-    screens: ['scavenge'],
+    screens: ['any'],
     defaultEnabled: false,
-
     async run(ctx) {
-      const { storage, log } = ctx;
-      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
-
-      if (!settings.enabled) return;
-
-      const panel = document.createElement('div');
-      panel.id = PANEL_ID;
-      Object.assign(panel.style, {
-        position: 'fixed', top: '60px', left: '16px', width: '260px',
-        background: '#f4e4bc', border: '2px solid #7a5230', borderRadius: '6px',
-        padding: '10px', zIndex: 99998, fontSize: '11px', color: '#1a1a1a',
-        fontFamily: 'Verdana, Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
-      });
-
-      const title = document.createElement('div');
-      title.style.fontWeight = 'bold';
-      title.style.marginBottom = '6px';
-      title.textContent = 'Coleta Automática';
-      panel.appendChild(title);
-
-      const statusEl = document.createElement('div');
-      statusEl.style.fontSize = '10px';
-      statusEl.style.marginBottom = '4px';
-      statusEl.textContent = settings.dryRun ? '(modo teste)' : '(coletando...)';
-      panel.appendChild(statusEl);
-
-      const dryRunCb = document.createElement('input');
-      dryRunCb.type = 'checkbox';
-      dryRunCb.checked = settings.dryRun;
-      dryRunCb.addEventListener('change', async () => {
-        settings.dryRun = dryRunCb.checked;
-        statusEl.textContent = settings.dryRun ? '(modo teste)' : '(coletando...)';
-        await storage.setModuleSettings(MODULE_ID, settings);
-      });
-
-      panel.appendChild(dryRunCb);
-      panel.appendChild(document.createTextNode(' Modo teste'));
-
-      document.body.appendChild(panel);
-
-      // Loop de coleta
-      const collectLoop = setInterval(() => {
-        const buttons = findCollectButtons();
-        if (buttons.length === 0) return;
-
-        for (const btn of buttons) {
-          if (settings.dryRun) {
-            log.info('(teste) clicaria em botão de coleta');
-          } else {
-            log.info('Coletando...');
-            btn.click();
-          }
-        }
-      }, settings.interval);
+      const ui = S.card(MODULE_ID, 'Coleta');
+      S.loop(`${MODULE_ID}:${S.villageId()}`, async () => {
+        const s = await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS);
+        const r = await S.scavengeVillage(S.villageId(), s, ctx.log);
+        ui.setStatus(r.sent ? `${r.dry ? 'teste: ' : ''}${r.sent} coleta(s) enviada(s)` : r.reason);
+      }, 45000, 75000);
     },
   });
 })();
@@ -1881,291 +2448,252 @@
 })();
 
 // ============================================================
-// MÓDULO: balanceador-recursos (Fase 3)
+// MÓDULO: mega-builder — fila de construção sem premium
 //
-// Move recursos automaticamente entre aldeias pra manter
-// distribuição equilibrada. Roda na tela de overview.
+// Lê `BuildingMain.buildings` (regex do TWB, GPL-3, só referência) e
+// constrói via ajaxaction=upgrade_building. Fila: "main:3, barracks:1".
+// UNVERIFIED: payload do upgrade_building e textos de erro exatos.
 // ============================================================
-(function registerResourceBalancerModule() {
+(function registerMegaBuilder() {
   'use strict';
-
-  const MODULE_ID = 'resource-balancer';
-  const PANEL_ID = 'twsuite-balancer-panel';
-
-  const DEFAULT_SETTINGS = {
-    enabled: false,
-    targetPercentage: 50, // manter 50% dos recursos em cada aldeia
-    interval: 10000,
-    dryRun: true,
-  };
-
-  window.TWSuite.registerModule({
-    id: MODULE_ID,
-    name: 'Balanceador de Recursos',
-    screens: ['overview_villages'],
-    defaultEnabled: false,
-
-    async run(ctx) {
-      const { storage, log } = ctx;
-      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
-
-      if (!settings.enabled) return;
-
-      const panel = document.createElement('div');
-      panel.id = PANEL_ID;
-      Object.assign(panel.style, {
-        position: 'fixed', top: '60px', left: '16px', width: '280px',
-        background: '#f4e4bc', border: '2px solid #7a5230', borderRadius: '6px',
-        padding: '10px', zIndex: 99998, fontSize: '11px', color: '#1a1a1a',
-        fontFamily: 'Verdana, Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
-      });
-
-      const title = document.createElement('div');
-      title.style.fontWeight = 'bold';
-      title.style.marginBottom = '6px';
-      title.textContent = 'Balanceador de Recursos';
-      panel.appendChild(title);
-
-      const percentInput = document.createElement('input');
-      percentInput.type = 'number';
-      percentInput.min = '10';
-      percentInput.max = '90';
-      percentInput.value = String(settings.targetPercentage);
-      percentInput.style.width = '60px';
-      percentInput.addEventListener('change', async () => {
-        settings.targetPercentage = Math.max(10, Math.min(90, Number(percentInput.value) || 50));
-        await storage.setModuleSettings(MODULE_ID, settings);
-      });
-
-      const dryRunCb = document.createElement('input');
-      dryRunCb.type = 'checkbox';
-      dryRunCb.checked = settings.dryRun;
-      dryRunCb.addEventListener('change', async () => {
-        settings.dryRun = dryRunCb.checked;
-        await storage.setModuleSettings(MODULE_ID, settings);
-      });
-
-      panel.appendChild(document.createTextNode('Alvo: '));
-      panel.appendChild(percentInput);
-      panel.appendChild(document.createTextNode('%'));
-      panel.appendChild(document.createElement('br'));
-      panel.appendChild(dryRunCb);
-      panel.appendChild(document.createTextNode(' Modo teste'));
-
-      document.body.appendChild(panel);
-
-      const balanceLoop = setInterval(() => {
-        if (settings.dryRun) {
-          log.info('(teste) balancearia recursos entre aldeias');
-        } else {
-          log.info('Balanceando recursos...');
-        }
-      }, settings.interval);
-
-      log.info('Balanceador de Recursos carregado.');
-    },
-  });
-})();
-
-// ============================================================
-// MÓDULO: mega-construtor (Fase 3)
-//
-// Constrói automaticamente na tela principal (main).
-// Detecta fila de construção e clica no próximo link.
-// ============================================================
-(function registerMegaBuilderModule() {
-  'use strict';
-
+  const TW = window.TWSuite;
+  const S = TW.shared;
   const MODULE_ID = 'mega-builder';
-  const PANEL_ID = 'twsuite-builder-panel';
+  const DEFAULT_QUEUE = 'wood:1, stone:1, iron:1, wood:2, stone:2, main:2, farm:2, storage:2, wood:3, stone:3, iron:2, main:3, barracks:1, wood:5, stone:5, iron:4, storage:5, farm:5, main:5, market:1, smith:1, wood:10, stone:10, iron:8, storage:10, farm:10, main:10, wall:5';
+  const DEFAULTS = { queue: DEFAULT_QUEUE, interval: 60000, maxQueue: 2, strictOrder: true, autoFarmStorage: true, allVillages: false, dryRun: true };
+  const NAMES = { main: 'Edifício principal', barracks: 'Quartel', stable: 'Estábulo', garage: 'Oficina', church: 'Igreja', church_f: 'Primeira igreja', watchtower: 'Torre', snob: 'Academia', smith: 'Ferreiro', place: 'Praça', statue: 'Estátua', market: 'Mercado', wood: 'Bosque', stone: 'Poço de argila', iron: 'Mina de ferro', farm: 'Fazenda', storage: 'Armazém', hide: 'Esconderijo', wall: 'Muralha' };
 
-  const DEFAULT_SETTINGS = {
-    enabled: false,
-    interval: 5000,
-    dryRun: true,
-  };
-
-  function findBuildLinks() {
-    const links = [];
-    document.querySelectorAll('a, button').forEach((el) => {
-      const text = (el.textContent || el.innerText || '').toLowerCase();
-      if ((text.includes('construir') || text.includes('upgrade') || text.includes('build')) && !el.disabled) {
-        links.push(el);
-      }
-    });
-    return links;
+  function parseQueue(text) {
+    return String(text || '').split(/[,;\n]+/).map((p) => p.trim()).filter(Boolean).map((p) => {
+      const [b, lvl] = p.split(':').map((x) => x.trim());
+      return { building: b, level: Number(lvl) || 1 };
+    }).filter((q) => NAMES[q.building]);
   }
 
-  window.TWSuite.registerModule({
+  function buildingsFrom(text) {
+    const m = text.match(/BuildingMain\.buildings = (\{.+?\});/s);
+    if (!m) return null;
+    try { return JSON.parse(m[1]); } catch { return null; }
+  }
+
+  function queuedCounts(doc) {
+    const counts = {};
+    let total = 0;
+    for (const tr of doc.querySelectorAll('#build_queue tr[class*="buildorder_"]')) {
+      const m = tr.className.match(/buildorder_([a-z_]+)/);
+      if (!m) continue;
+      counts[m[1]] = (counts[m[1]] || 0) + 1;
+      total++;
+    }
+    return { counts, total };
+  }
+
+  async function buildOnce(vid, s, log) {
+    const page = await S.getPage(`/game.php?village=${vid}&screen=main`);
+    const buildings = buildingsFrom(page.text);
+    if (!buildings) return 'dados do edifício principal não encontrados';
+    const { counts, total } = queuedCounts(page.doc);
+    if (total >= s.maxQueue) return `fila cheia (${total}/${s.maxQueue})`;
+
+    const plan = parseQueue(s.queue || DEFAULT_QUEUE);
+    for (const step of plan) {
+      const b = buildings[step.building];
+      if (!b) continue;
+      const effective = Number(b.level || 0) + (counts[step.building] || 0);
+      if (effective >= step.level) continue;
+
+      let target = step.building;
+      const err = String(b.error || '');
+      if (err && s.autoFarmStorage) {
+        if (/fazenda|popula/i.test(err) && buildings.farm && !buildings.farm.error) target = 'farm';
+        else if (/armaz/i.test(err) && buildings.storage && !buildings.storage.error) target = 'storage';
+      }
+      const tb = buildings[target];
+      if (tb && tb.error && target === step.building) {
+        if (s.strictOrder) return `aguardando: ${NAMES[step.building]} nv.${step.level} (${String(tb.error).replace(/<[^>]+>/g, '')})`;
+        continue;
+      }
+
+      if (s.dryRun) {
+        log.info(`(teste) construiria ${NAMES[target]} na aldeia ${vid}`);
+        return `teste: construiria ${NAMES[target]}`;
+      }
+      const res = await S.ajax('main', 'upgrade_building', { id: target, force: 1, destroy: 0, source: vid }, { type: 'main' }, vid);
+      if (!res.ok) return `recusado: ${res.reason}`;
+      log.info(`Construção iniciada: ${NAMES[target]} (aldeia ${vid})`);
+      return `${NAMES[target]} entrou na fila`;
+    }
+    return 'fila de construção concluída';
+  }
+
+  TW.registerModule({
     id: MODULE_ID,
     name: 'Mega Construtor',
-    screens: ['main'],
+    screens: ['any'],
     defaultEnabled: false,
-
     async run(ctx) {
-      const { storage, log } = ctx;
-      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+      const ui = S.card(MODULE_ID, 'Construtor');
+      let allVillages = false;
+      try { allVillages = (await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS)).allVillages; } catch { /* usa padrão */ }
 
-      if (!settings.enabled) return;
-
-      const panel = document.createElement('div');
-      panel.id = PANEL_ID;
-      Object.assign(panel.style, {
-        position: 'fixed', top: '60px', left: '16px', width: '260px',
-        background: '#f4e4bc', border: '2px solid #7a5230', borderRadius: '6px',
-        padding: '10px', zIndex: 99998, fontSize: '11px', color: '#1a1a1a',
-        fontFamily: 'Verdana, Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
-      });
-
-      const title = document.createElement('div');
-      title.style.fontWeight = 'bold';
-      title.style.marginBottom = '6px';
-      title.textContent = 'Mega Construtor';
-      panel.appendChild(title);
-
-      const statusEl = document.createElement('div');
-      statusEl.style.fontSize = '10px';
-      statusEl.style.marginBottom = '4px';
-      statusEl.textContent = settings.dryRun ? '(modo teste)' : '(construindo...)';
-      panel.appendChild(statusEl);
-
-      const dryRunCb = document.createElement('input');
-      dryRunCb.type = 'checkbox';
-      dryRunCb.checked = settings.dryRun;
-      dryRunCb.addEventListener('change', async () => {
-        settings.dryRun = dryRunCb.checked;
-        statusEl.textContent = settings.dryRun ? '(modo teste)' : '(construindo...)';
-        await storage.setModuleSettings(MODULE_ID, settings);
-      });
-
-      panel.appendChild(dryRunCb);
-      panel.appendChild(document.createTextNode(' Modo teste'));
-
-      document.body.appendChild(panel);
-
-      const buildLoop = setInterval(() => {
-        const links = findBuildLinks();
-        if (links.length === 0) return;
-
-        const link = links[0];
-        if (settings.dryRun) {
-          log.info('(teste) clicaria pra construir');
-        } else {
-          log.info('Iniciando construção...');
-          link.click();
+      S.loop(allVillages ? MODULE_ID : `${MODULE_ID}:${S.villageId()}`, async () => {
+        const s = { ...DEFAULTS, ...(await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS)) };
+        const villages = s.allVillages ? await S.myVillages() : [{ id: S.villageId(), name: 'aldeia atual' }];
+        const results = [];
+        for (const v of villages) {
+          if (S.botState.active) return;
+          const r = await buildOnce(v.id, s, ctx.log);
+          results.push(r);
+          if (villages.length > 1) await S.sleep(S.jitter(1500, 3500));
         }
-      }, settings.interval);
-
-      log.info('Mega Construtor carregado.');
+        ui.setStatus(villages.length > 1 ? `${villages.length} aldeia(s) verificada(s)` : results[0]);
+      }, 55000, 85000);
     },
   });
 })();
 
 // ============================================================
-// MÓDULO: coleta-massa (Fase 3)
+// MÓDULO: resource-balancer — distribui recursos entre as aldeias
 //
-// Coleta de todos os alvos bárbaros em massa na tela
-// de farm (am_farm). Clica em cada um automaticamente.
+// Lê recursos/armazém de cada aldeia pela página do mercado
+// (TribalWars.updateGameData embutido no HTML) e envia excedentes
+// para quem está abaixo do alvo, priorizando a aldeia mais perto.
+// UNVERIFIED: formulários de envio do mercado (screen=market&mode=send).
 // ============================================================
-(function registerMassCollectModule() {
+(function registerBalancer() {
   'use strict';
+  const TW = window.TWSuite;
+  const S = TW.shared;
+  const MODULE_ID = 'resource-balancer';
+  const DEFAULTS = { targetPercentage: 50, tolerance: 15, cycleMinutes: 30, minShipment: 1000, maxVillages: 30, dryRun: true };
 
-  const MODULE_ID = 'mass-collect';
-  const PANEL_ID = 'twsuite-masscollect-panel';
-
-  const DEFAULT_SETTINGS = {
-    enabled: false,
-    interval: 1000,
-    maxPerBatch: 10,
-    dryRun: true,
-  };
-
-  function findFarmButtons() {
-    const buttons = [];
-    document.querySelectorAll('a.farm_icon_a, button[class*="farm"], input[value*="Farm"]').forEach((el) => {
-      if (!el.disabled) buttons.push(el);
-    });
-    return buttons;
+  async function snapshot(v) {
+    const page = await S.getPage(`/game.php?village=${v.id}&screen=market&mode=send`);
+    const g = S.gameDataFromHtml(page.text);
+    const merchantsEl = page.doc.querySelector('#market_merchant_available_count');
+    if (!g || !g.village) return null;
+    return {
+      ...v,
+      storage: Number(g.village.storage_max) || 0,
+      res: { wood: Math.floor(g.village.wood), stone: Math.floor(g.village.stone), iron: Math.floor(g.village.iron) },
+      merchants: merchantsEl ? S.num(merchantsEl.textContent) : 0,
+      hasMarket: !!page.doc.querySelector('input[name="wood"]'),
+    };
   }
 
-  window.TWSuite.registerModule({
+  function plan(snaps, s) {
+    const target = s.targetPercentage / 100;
+    const tol = s.tolerance / 100;
+    const shipments = [];
+    const cap = new Map(snaps.map((v) => [v.id, v.merchants * 1000]));
+    for (const r of S.RESOURCES) {
+      const donors = snaps.filter((v) => v.hasMarket && v.storage && v.res[r] / v.storage > target + tol);
+      const takers = snaps.filter((v) => v.storage && v.res[r] / v.storage < target - tol);
+      for (const t of takers) {
+        let need = Math.floor(target * t.storage - t.res[r]);
+        donors.sort((a, b) => S.dist(a.x, a.y, t.x, t.y) - S.dist(b.x, b.y, t.x, t.y));
+        for (const d of donors) {
+          if (need < s.minShipment) break;
+          const spare = Math.floor(d.res[r] - target * d.storage);
+          const amount = Math.floor(Math.min(need, spare, cap.get(d.id) || 0) / 1000) * 1000;
+          if (amount < s.minShipment) continue;
+          shipments.push({ from: d, to: t, r, amount });
+          d.res[r] -= amount;
+          t.res[r] += amount;
+          cap.set(d.id, cap.get(d.id) - amount);
+          need -= amount;
+        }
+      }
+    }
+    return shipments;
+  }
+
+  TW.registerModule({
+    id: MODULE_ID,
+    name: 'Balanceador de Recursos',
+    screens: ['any'],
+    defaultEnabled: false,
+    async run(ctx) {
+      const ui = S.card(MODULE_ID, 'Balanceador');
+      S.loop(MODULE_ID, async () => {
+        const s = { ...DEFAULTS, ...(await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS)) };
+        const villages = (await S.myVillages()).slice(0, s.maxVillages);
+        if (villages.length < 2) return ui.setStatus('precisa de 2+ aldeias');
+        const snaps = [];
+        for (const v of villages) {
+          if (S.botState.active) return;
+          ui.setStatus(`lendo ${v.name}`);
+          const snap = await snapshot(v);
+          if (snap && snap.storage) snaps.push(snap);
+          await S.sleep(S.jitter(900, 2000));
+        }
+        const shipments = plan(snaps, s);
+        if (!shipments.length) return ui.setStatus(`equilibrado (alvo ${s.targetPercentage}%)`);
+        let ok = 0;
+        for (const sh of shipments) {
+          if (S.botState.active) return;
+          const desc = `${sh.amount} ${S.RES_LABELS[sh.r]}: ${sh.from.name} → ${sh.to.name}`;
+          if (s.dryRun) {
+            ctx.log.info(`(teste) enviaria ${desc}`);
+            ok++;
+            continue;
+          }
+          const res = await S.sendResources(sh.from.id, { [sh.r]: sh.amount }, sh.to.x, sh.to.y);
+          if (res.ok) {
+            ok++;
+            ctx.log.info(`Enviado ${desc}`);
+          } else {
+            ctx.log.warn(`Falhou ${desc}:`, res.reason);
+          }
+          await S.sleep(S.jitter(1500, 3500));
+        }
+        ui.setStatus(`${s.dryRun ? 'teste: ' : ''}${ok}/${shipments.length} envio(s)`);
+      }, Math.max(10, DEFAULTS.cycleMinutes) * 60000, Math.max(10, DEFAULTS.cycleMinutes) * 60000 * 1.2);
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: mass-collect — coleta em todas as aldeias
+// ============================================================
+(function registerMassCollect() {
+  'use strict';
+  const TW = window.TWSuite;
+  const S = TW.shared;
+  const MODULE_ID = 'mass-collect';
+  const DEFAULTS = { cycleMinutes: 15, maxPerBatch: 25, interval: 2500, excludeUnits: 'knight', waitAllIdle: true, groupFilter: '', dryRun: true };
+
+  TW.registerModule({
     id: MODULE_ID,
     name: 'Coleta em Massa',
-    screens: ['am_farm'],
+    screens: ['any'],
     defaultEnabled: false,
-
     async run(ctx) {
-      const { storage, log } = ctx;
-      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+      const ui = S.card(MODULE_ID, 'Coleta em Massa');
 
-      if (!settings.enabled) return;
-
-      const panel = document.createElement('div');
-      panel.id = PANEL_ID;
-      Object.assign(panel.style, {
-        position: 'fixed', top: '60px', left: '16px', width: '280px',
-        background: '#f4e4bc', border: '2px solid #7a5230', borderRadius: '6px',
-        padding: '10px', zIndex: 99998, fontSize: '11px', color: '#1a1a1a',
-        fontFamily: 'Verdana, Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
-      });
-
-      const title = document.createElement('div');
-      title.style.fontWeight = 'bold';
-      title.style.marginBottom = '6px';
-      title.textContent = 'Coleta em Massa';
-      panel.appendChild(title);
-
-      const countEl = document.createElement('div');
-      countEl.style.fontSize = '10px';
-      countEl.style.marginBottom = '4px';
-      countEl.textContent = '0 coletadas';
-      panel.appendChild(countEl);
-
-      const maxInput = document.createElement('input');
-      maxInput.type = 'number';
-      maxInput.min = '1';
-      maxInput.value = String(settings.maxPerBatch);
-      maxInput.style.width = '60px';
-      maxInput.addEventListener('change', async () => {
-        settings.maxPerBatch = Math.max(1, Number(maxInput.value) || 10);
-        await storage.setModuleSettings(MODULE_ID, settings);
-      });
-
-      const dryRunCb = document.createElement('input');
-      dryRunCb.type = 'checkbox';
-      dryRunCb.checked = settings.dryRun;
-      dryRunCb.addEventListener('change', async () => {
-        settings.dryRun = dryRunCb.checked;
-        await storage.setModuleSettings(MODULE_ID, settings);
-      });
-
-      panel.appendChild(document.createTextNode('Max por ciclo: '));
-      panel.appendChild(maxInput);
-      panel.appendChild(document.createElement('br'));
-      panel.appendChild(dryRunCb);
-      panel.appendChild(document.createTextNode(' Modo teste'));
-
-      document.body.appendChild(panel);
-
-      let collectedCount = 0;
-      const massCollectLoop = setInterval(() => {
-        const buttons = findFarmButtons();
-        if (buttons.length === 0) return;
-
-        const toCollect = buttons.slice(0, settings.maxPerBatch);
-        for (const btn of toCollect) {
-          if (settings.dryRun) {
-            log.info('(teste) coletaria de um alvo');
-          } else {
-            log.info('Coletando...');
-            btn.click();
-          }
-          collectedCount++;
+      S.loop(MODULE_ID, async () => {
+        const s = await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS);
+        let villages = await S.myVillages();
+        if (s.groupFilter) {
+          const f = String(s.groupFilter).toLowerCase();
+          villages = villages.filter((v) => v.name.toLowerCase().includes(f));
         }
-        countEl.textContent = `${collectedCount} coletadas`;
-      }, settings.interval);
-
-      log.info('Coleta em Massa carregada.');
+        villages = villages.slice(0, Math.max(1, Number(s.maxPerBatch) || 25));
+        let total = 0;
+        for (const [idx, v] of villages.entries()) {
+          if (S.botState.active) return;
+          ui.setStatus(`${idx + 1}/${villages.length}: ${v.name}`);
+          try {
+            const r = await S.scavengeVillage(v.id, s, ctx.log);
+            total += r.sent || 0;
+          } catch (e) {
+            if (e instanceof S.BotCheckError) return;
+            ctx.log.warn(`Coleta falhou em ${v.name}:`, e);
+          }
+          await S.sleep(S.jitter(Number(s.interval) || 2500, (Number(s.interval) || 2500) * 1.8));
+        }
+        ui.setStatus(`${s.dryRun ? 'teste: ' : ''}${total} coleta(s) em ${villages.length} aldeia(s) · ${new Date().toLocaleTimeString()}`);
+      }, Math.max(5, DEFAULTS.cycleMinutes) * 60000, Math.max(5, DEFAULTS.cycleMinutes) * 60000 * 1.25);
     },
   });
 })();
