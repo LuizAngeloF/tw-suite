@@ -12,7 +12,7 @@ Não é afiliado à InnoGames. Automatizar o jogo viola as regras oficiais do Tr
 - **Auto Farm**: ativo na tela da Praça de Reunião (`screen=place`). Lê `/map/village.txt` (dados públicos do mundo) pra achar aldeias bárbaras perto da aldeia atual, mostra a lista num painel com distância, e ao clicar "Enviar" manda as duas requisições reais de ataque direto via `fetch()` (não simula clique — depois de várias tentativas sem sucesso, descobrimos via HAR que o envio real é uma submissão de formulário genuína, então replicamos ela). **Sobe desligado por padrão** (ative em "TW Suite" → módulo "Auto Farm (sem premium)") e em **modo teste (dry-run)** — nada é enviado de verdade até você desmarcar essa opção no painel do próprio módulo.
   - Não depende do Assistente de Saque nativo (que é premium neste mundo).
   - Não depende de simular clique em nada — os tokens/campos são lidos ao vivo do formulário e da resposta do jogo a cada envio, não fixos no código.
-  - **Ainda não testado ao vivo** o fluxo novo (v0.4.0) enviando de verdade — ver [`docs/verification-log.md`](docs/verification-log.md) pro status mais recente e o payload completo capturado.
+  - **Testado ao vivo e confirmado (v0.4.1): envio real funcionando ponta a ponta.** Ver [`docs/verification-log.md`](docs/verification-log.md) pro histórico completo (inclusive o que foi tentado e não funcionou, útil se algo quebrar no futuro).
   - Um alvo só sai da lista depois de um envio realmente confirmado. Botão **"Restaurar alvos"** no painel limpa o cooldown da aldeia atual, trazendo de volta qualquer alvo já tentado.
 
 Módulos planejados, em ordem: ~~Auto Farm~~ → Agendador de Comandos → Construção Automática → Notificações (Discord/WhatsApp).

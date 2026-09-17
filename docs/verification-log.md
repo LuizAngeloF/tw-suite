@@ -67,7 +67,9 @@ h=ffbbc10a
 
 Causa: `submitAttackStep2` monta o corpo da requisição a partir do HTML estático devolvido pela etapa 1, parseado via `DOMParser` — que **não executa `<script>`**. O campo `h` não é um `<input>` oculto no HTML; é inserido pelo próprio JavaScript do jogo na hora do envio de verdade, então nunca aparece no HTML puro.
 
-**Corrigido em v0.4.1**: confirmado ao vivo que `h` é simplesmente `game_data.csrf` (`Object.keys(game_data)` incluía `csrf`, e o valor batia exatamente com o `h` capturado no envio manual: `ffbbc10a`). `submitAttack`/`submitAttackStep2` agora recebem esse valor como parâmetro (lido de `gameApi.getGameData().csrf` no momento do clique) e o incluem explicitamente no corpo da etapa 2. Ainda não retestado.
+**Corrigido em v0.4.1**: confirmado ao vivo que `h` é simplesmente `game_data.csrf` (`Object.keys(game_data)` incluía `csrf`, e o valor batia exatamente com o `h` capturado no envio manual: `ffbbc10a`). `submitAttack`/`submitAttackStep2` agora recebem esse valor como parâmetro (lido de `gameApi.getGameData().csrf` no momento do clique) e o incluem explicitamente no corpo da etapa 2.
+
+**RETESTADO E FUNCIONANDO (2026-09-19, v0.4.1).** Envio real confirmado pelo usuário — ataque saiu de verdade, sem clicar em nada na UI do jogo. **Fase 1 (Auto Farm) considerada 100% concluída e verificada ponta a ponta**: descoberta de alvo via `/map/village.txt` → montagem e envio da etapa 1 (`try=confirm`) → extração de `game_data.csrf` → envio da etapa 2 (`action=command`) → ataque despachado de verdade, tudo via `fetch()`, sem depender de nenhum clique simulado.
 
 ## Fases futuras (ainda não implementadas)
 
