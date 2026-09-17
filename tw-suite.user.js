@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.1.1
+// @version      0.1.2
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -383,8 +383,9 @@
       if (!panelEl) return;
       const diag = panelEl.querySelector('#twsuite-diagnostics');
       const gd = gameApi.getGameData();
+      const version = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '?';
       const lines = [
-        `Versão: 0.1.0 (Fase 0)`,
+        `Versão: ${version}`,
         `Tela atual: ${gameApi.getCurrentScreen()}`,
         `game_data: ${gd ? 'encontrado' : 'NÃO encontrado'}`,
         `Offset de servidor: ${serverTime.offsetMs}ms`,
