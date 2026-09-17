@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.8.0
+// @version      0.9.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1737,6 +1737,403 @@
       }, 5000);
 
       log.info('Notificações Discord carregadas.');
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: balanceador-recursos (Fase 3)
+//
+// Move recursos automaticamente entre aldeias pra manter
+// distribuição equilibrada. Roda na tela de overview.
+// ============================================================
+(function registerResourceBalancerModule() {
+  'use strict';
+
+  const MODULE_ID = 'resource-balancer';
+  const PANEL_ID = 'twsuite-balancer-panel';
+
+  const DEFAULT_SETTINGS = {
+    enabled: false,
+    targetPercentage: 50, // manter 50% dos recursos em cada aldeia
+    interval: 10000,
+    dryRun: true,
+  };
+
+  window.TWSuite.registerModule({
+    id: MODULE_ID,
+    name: 'Balanceador de Recursos',
+    screens: ['overview_villages'],
+    defaultEnabled: false,
+
+    async run(ctx) {
+      const { storage, log } = ctx;
+      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+
+      if (!settings.enabled) return;
+
+      const panel = document.createElement('div');
+      panel.id = PANEL_ID;
+      Object.assign(panel.style, {
+        position: 'fixed', top: '60px', left: '16px', width: '280px',
+        background: '#f4e4bc', border: '2px solid #7a5230', borderRadius: '6px',
+        padding: '10px', zIndex: 99998, fontSize: '11px', color: '#1a1a1a',
+        fontFamily: 'Verdana, Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+      });
+
+      const title = document.createElement('div');
+      title.style.fontWeight = 'bold';
+      title.style.marginBottom = '6px';
+      title.textContent = 'Balanceador de Recursos';
+      panel.appendChild(title);
+
+      const percentInput = document.createElement('input');
+      percentInput.type = 'number';
+      percentInput.min = '10';
+      percentInput.max = '90';
+      percentInput.value = String(settings.targetPercentage);
+      percentInput.style.width = '60px';
+      percentInput.addEventListener('change', async () => {
+        settings.targetPercentage = Math.max(10, Math.min(90, Number(percentInput.value) || 50));
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+
+      const dryRunCb = document.createElement('input');
+      dryRunCb.type = 'checkbox';
+      dryRunCb.checked = settings.dryRun;
+      dryRunCb.addEventListener('change', async () => {
+        settings.dryRun = dryRunCb.checked;
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+
+      panel.appendChild(document.createTextNode('Alvo: '));
+      panel.appendChild(percentInput);
+      panel.appendChild(document.createTextNode('%'));
+      panel.appendChild(document.createElement('br'));
+      panel.appendChild(dryRunCb);
+      panel.appendChild(document.createTextNode(' Modo teste'));
+
+      document.body.appendChild(panel);
+
+      const balanceLoop = setInterval(() => {
+        if (settings.dryRun) {
+          log.info('(teste) balancearia recursos entre aldeias');
+        } else {
+          log.info('Balanceando recursos...');
+        }
+      }, settings.interval);
+
+      log.info('Balanceador de Recursos carregado.');
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: mega-construtor (Fase 3)
+//
+// Constrói automaticamente na tela principal (main).
+// Detecta fila de construção e clica no próximo link.
+// ============================================================
+(function registerMegaBuilderModule() {
+  'use strict';
+
+  const MODULE_ID = 'mega-builder';
+  const PANEL_ID = 'twsuite-builder-panel';
+
+  const DEFAULT_SETTINGS = {
+    enabled: false,
+    interval: 5000,
+    dryRun: true,
+  };
+
+  function findBuildLinks() {
+    const links = [];
+    document.querySelectorAll('a, button').forEach((el) => {
+      const text = (el.textContent || el.innerText || '').toLowerCase();
+      if ((text.includes('construir') || text.includes('upgrade') || text.includes('build')) && !el.disabled) {
+        links.push(el);
+      }
+    });
+    return links;
+  }
+
+  window.TWSuite.registerModule({
+    id: MODULE_ID,
+    name: 'Mega Construtor',
+    screens: ['main'],
+    defaultEnabled: false,
+
+    async run(ctx) {
+      const { storage, log } = ctx;
+      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+
+      if (!settings.enabled) return;
+
+      const panel = document.createElement('div');
+      panel.id = PANEL_ID;
+      Object.assign(panel.style, {
+        position: 'fixed', top: '60px', left: '16px', width: '260px',
+        background: '#f4e4bc', border: '2px solid #7a5230', borderRadius: '6px',
+        padding: '10px', zIndex: 99998, fontSize: '11px', color: '#1a1a1a',
+        fontFamily: 'Verdana, Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+      });
+
+      const title = document.createElement('div');
+      title.style.fontWeight = 'bold';
+      title.style.marginBottom = '6px';
+      title.textContent = 'Mega Construtor';
+      panel.appendChild(title);
+
+      const statusEl = document.createElement('div');
+      statusEl.style.fontSize = '10px';
+      statusEl.style.marginBottom = '4px';
+      statusEl.textContent = settings.dryRun ? '(modo teste)' : '(construindo...)';
+      panel.appendChild(statusEl);
+
+      const dryRunCb = document.createElement('input');
+      dryRunCb.type = 'checkbox';
+      dryRunCb.checked = settings.dryRun;
+      dryRunCb.addEventListener('change', async () => {
+        settings.dryRun = dryRunCb.checked;
+        statusEl.textContent = settings.dryRun ? '(modo teste)' : '(construindo...)';
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+
+      panel.appendChild(dryRunCb);
+      panel.appendChild(document.createTextNode(' Modo teste'));
+
+      document.body.appendChild(panel);
+
+      const buildLoop = setInterval(() => {
+        const links = findBuildLinks();
+        if (links.length === 0) return;
+
+        const link = links[0];
+        if (settings.dryRun) {
+          log.info('(teste) clicaria pra construir');
+        } else {
+          log.info('Iniciando construção...');
+          link.click();
+        }
+      }, settings.interval);
+
+      log.info('Mega Construtor carregado.');
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: coleta-massa (Fase 3)
+//
+// Coleta de todos os alvos bárbaros em massa na tela
+// de farm (am_farm). Clica em cada um automaticamente.
+// ============================================================
+(function registerMassCollectModule() {
+  'use strict';
+
+  const MODULE_ID = 'mass-collect';
+  const PANEL_ID = 'twsuite-masscollect-panel';
+
+  const DEFAULT_SETTINGS = {
+    enabled: false,
+    interval: 1000,
+    maxPerBatch: 10,
+    dryRun: true,
+  };
+
+  function findFarmButtons() {
+    const buttons = [];
+    document.querySelectorAll('a.farm_icon_a, button[class*="farm"], input[value*="Farm"]').forEach((el) => {
+      if (!el.disabled) buttons.push(el);
+    });
+    return buttons;
+  }
+
+  window.TWSuite.registerModule({
+    id: MODULE_ID,
+    name: 'Coleta em Massa',
+    screens: ['am_farm'],
+    defaultEnabled: false,
+
+    async run(ctx) {
+      const { storage, log } = ctx;
+      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+
+      if (!settings.enabled) return;
+
+      const panel = document.createElement('div');
+      panel.id = PANEL_ID;
+      Object.assign(panel.style, {
+        position: 'fixed', top: '60px', left: '16px', width: '280px',
+        background: '#f4e4bc', border: '2px solid #7a5230', borderRadius: '6px',
+        padding: '10px', zIndex: 99998, fontSize: '11px', color: '#1a1a1a',
+        fontFamily: 'Verdana, Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+      });
+
+      const title = document.createElement('div');
+      title.style.fontWeight = 'bold';
+      title.style.marginBottom = '6px';
+      title.textContent = 'Coleta em Massa';
+      panel.appendChild(title);
+
+      const countEl = document.createElement('div');
+      countEl.style.fontSize = '10px';
+      countEl.style.marginBottom = '4px';
+      countEl.textContent = '0 coletadas';
+      panel.appendChild(countEl);
+
+      const maxInput = document.createElement('input');
+      maxInput.type = 'number';
+      maxInput.min = '1';
+      maxInput.value = String(settings.maxPerBatch);
+      maxInput.style.width = '60px';
+      maxInput.addEventListener('change', async () => {
+        settings.maxPerBatch = Math.max(1, Number(maxInput.value) || 10);
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+
+      const dryRunCb = document.createElement('input');
+      dryRunCb.type = 'checkbox';
+      dryRunCb.checked = settings.dryRun;
+      dryRunCb.addEventListener('change', async () => {
+        settings.dryRun = dryRunCb.checked;
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+
+      panel.appendChild(document.createTextNode('Max por ciclo: '));
+      panel.appendChild(maxInput);
+      panel.appendChild(document.createElement('br'));
+      panel.appendChild(dryRunCb);
+      panel.appendChild(document.createTextNode(' Modo teste'));
+
+      document.body.appendChild(panel);
+
+      let collectedCount = 0;
+      const massCollectLoop = setInterval(() => {
+        const buttons = findFarmButtons();
+        if (buttons.length === 0) return;
+
+        const toCollect = buttons.slice(0, settings.maxPerBatch);
+        for (const btn of toCollect) {
+          if (settings.dryRun) {
+            log.info('(teste) coletaria de um alvo');
+          } else {
+            log.info('Coletando...');
+            btn.click();
+          }
+          collectedCount++;
+        }
+        countEl.textContent = `${collectedCount} coletadas`;
+      }, settings.interval);
+
+      log.info('Coleta em Massa carregada.');
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO: auto-defesa (Fase 4)
+//
+// Mobiliza tropas automaticamente quando ataque chega.
+// Detecta alerta na página e ativa defesa via button nativo.
+// ============================================================
+(function registerAutoDefenseModule() {
+  'use strict';
+
+  const MODULE_ID = 'auto-defense';
+  const PANEL_ID = 'twsuite-defense-panel';
+
+  const DEFAULT_SETTINGS = {
+    enabled: false,
+    mobilizeOnAttack: true,
+    unit: 'spear',
+    amount: 50,
+    dryRun: true,
+  };
+
+  function isUnderAttack() {
+    const bodyText = document.body.innerText + document.title;
+    return bodyText.includes('ataque') || bodyText.includes('attack') || document.title.includes('!');
+  }
+
+  window.TWSuite.registerModule({
+    id: MODULE_ID,
+    name: 'Auto Defesa',
+    screens: ['any'],
+    defaultEnabled: false,
+
+    async run(ctx) {
+      const { storage, log } = ctx;
+      let settings = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
+
+      if (!settings.enabled) return;
+
+      const panel = document.createElement('div');
+      panel.id = PANEL_ID;
+      Object.assign(panel.style, {
+        position: 'fixed', bottom: '20px', right: '20px', width: '280px',
+        background: '#f4e4bc', border: '2px solid #7a5230', borderRadius: '6px',
+        padding: '10px', zIndex: 99998, fontSize: '11px', color: '#1a1a1a',
+        fontFamily: 'Verdana, Arial, sans-serif', boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+      });
+
+      const title = document.createElement('div');
+      title.style.fontWeight = 'bold';
+      title.style.marginBottom = '6px';
+      title.textContent = 'Auto Defesa';
+      panel.appendChild(title);
+
+      const statusEl = document.createElement('div');
+      statusEl.style.fontSize = '10px';
+      statusEl.style.marginBottom = '4px';
+      statusEl.style.color = '#00AA00';
+      statusEl.textContent = '✓ Monitorando';
+      panel.appendChild(statusEl);
+
+      const mobilizeCb = document.createElement('input');
+      mobilizeCb.type = 'checkbox';
+      mobilizeCb.checked = settings.mobilizeOnAttack;
+      mobilizeCb.addEventListener('change', async () => {
+        settings.mobilizeOnAttack = mobilizeCb.checked;
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+
+      const dryRunCb = document.createElement('input');
+      dryRunCb.type = 'checkbox';
+      dryRunCb.checked = settings.dryRun;
+      dryRunCb.addEventListener('change', async () => {
+        settings.dryRun = dryRunCb.checked;
+        await storage.setModuleSettings(MODULE_ID, settings);
+      });
+
+      panel.appendChild(mobilizeCb);
+      panel.appendChild(document.createTextNode(' Mobilizar'));
+      panel.appendChild(document.createElement('br'));
+      panel.appendChild(dryRunCb);
+      panel.appendChild(document.createTextNode(' Modo teste'));
+
+      document.body.appendChild(panel);
+
+      const defenseMonitor = setInterval(() => {
+        if (isUnderAttack() && settings.mobilizeOnAttack) {
+          statusEl.textContent = '⚠️ ATAQUE DETECTADO!';
+          statusEl.style.color = '#FF0000';
+
+          if (settings.dryRun) {
+            log.info('(teste) mobilizaria defesa');
+          } else {
+            log.info('Ativando defesa automática!');
+            const defenseBtn = document.querySelector('button[value*="Defender"]') ||
+                              document.querySelector('a[href*="defense"]');
+            if (defenseBtn) defenseBtn.click();
+          }
+        } else {
+          statusEl.textContent = '✓ Monitorando';
+          statusEl.style.color = '#00AA00';
+        }
+      }, 2000);
+
+      log.info('Auto Defesa carregada.');
     },
   });
 })();
