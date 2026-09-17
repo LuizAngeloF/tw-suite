@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.2.0
+// @version      0.2.1
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -749,17 +749,21 @@
           const available = unitInput ? Number(unitInput.dataset.allCount || 0) : 0;
           const amount = Math.min(settings.amount, available);
 
+          if (settings.dryRun) {
+            if (available <= 0) {
+              log.info(`(modo teste) enviaria ${settings.amount} "${settings.unit}" para ${target.x}|${target.y} — mas você tem 0 disponíveis agora, um envio real seria bloqueado.`);
+            } else {
+              log.info(`(modo teste) enviaria ${amount} "${settings.unit}" para ${target.x}|${target.y}${amount < settings.amount ? ` (só ${available} disponíveis)` : ''}`);
+            }
+            return;
+          }
+
           if (available <= 0) {
             log.warn(`Sem "${settings.unit}" disponível nesta aldeia (0 unidades) — não enviado.`);
             return;
           }
           if (amount < settings.amount) {
             log.warn(`Só ${available} "${settings.unit}" disponíveis — enviando ${amount} em vez de ${settings.amount}.`);
-          }
-
-          if (settings.dryRun) {
-            log.info(`(modo teste) enviaria ${amount} "${settings.unit}" para ${target.x}|${target.y}`);
-            return;
           }
 
           const result = fillAndSubmitAttack(settings.unit, amount, target.x, target.y);
