@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.3.2
+// @version      0.3.3
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -639,6 +639,23 @@
     return !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
   }
 
+  // el.click() dispara um evento sem coordenadas reais (clientX/Y = 0).
+  // Algumas páginas rejeitam clique de confirmação final assim, mesmo
+  // sem checar isTrusted — simula mousedown/mouseup/click com as
+  // coordenadas reais do botão, que é o máximo que dá pra fazer via JS
+  // (o navegador nunca marca evento sintético como isTrusted; se o
+  // bloqueio for por isso, não tem contorno possível do lado do script).
+  function realisticClick(el) {
+    const rect = el.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0 };
+    el.dispatchEvent(new MouseEvent('mouseover', opts));
+    el.dispatchEvent(new MouseEvent('mousedown', opts));
+    el.dispatchEvent(new MouseEvent('mouseup', opts));
+    el.dispatchEvent(new MouseEvent('click', opts));
+  }
+
   // A tela de confirmação também aparece via transição client-side (sem
   // recarregar a página), então o botão não existe ainda no instante em
   // que clicamos "Ataque" — precisa esperar aparecer, do mesmo jeito que
@@ -900,7 +917,7 @@
             // ter sido substituído por um novo (SPA re-renderizando).
             const clickTarget = document.querySelector('#troop_confirm_submit') || confirmBtn;
             log.info(`Auto-confirmar: clicando em "Enviar ataque" -> ${target.x}|${target.y}.`);
-            clickTarget.click();
+            realisticClick(clickTarget);
 
             // Diagnóstico: se o botão ainda estiver lá e visível depois
             // do clique, o clique provavelmente não teve efeito (alguns
