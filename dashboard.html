@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TW Suite Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Verdana', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .content {
+            display: flex;
+            min-height: calc(100vh - 200px);
+        }
+
+        .sidebar {
+            width: 250px;
+            background: #f8f9fa;
+            border-right: 1px solid #ddd;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .sidebar h3 {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #666;
+            margin: 20px 0 10px 0;
+            font-weight: bold;
+        }
+
+        .sidebar .account-selector {
+            margin-bottom: 20px;
+        }
+
+        .sidebar input {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .sidebar button {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .sidebar button:hover {
+            background: #764ba2;
+        }
+
+        .module-list {
+            list-style: none;
+        }
+
+        .module-item {
+            padding: 10px;
+            margin: 5px 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .module-item:hover {
+            background: #e8e9ff;
+            border-color: #667eea;
+        }
+
+        .module-item.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+        }
+
+        .module-editor {
+            display: none;
+        }
+
+        .module-editor.active {
+            display: block;
+        }
+
+        .module-editor h2 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .settings-group {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+
+        .settings-group label {
+            display: block;
+            margin: 10px 0 5px 0;
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .settings-group input,
+        .settings-group select,
+        .settings-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: monospace;
+        }
+
+        .settings-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .toggle-switch {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .toggle-switch input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .button-group button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #764ba2;
+        }
+
+        .btn-secondary {
+            background: #ddd;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #ccc;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .alert {
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .footer {
+            background: #f8f9fa;
+            border-top: 1px solid #ddd;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .module-status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            background: #ccc;
+        }
+
+        .module-status.enabled {
+            background: #28a745;
+        }
+
+        @media (max-width: 768px) {
+            .content {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid #ddd;
+                max-height: 200px;
+            }
+
+            .header h1 {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎮 TW Suite Dashboard</h1>
+            <p>Controle centralizado de automação para Tribal Wars</p>
+        </div>
+
+        <div class="content">
+            <div class="sidebar">
+                <div class="account-selector">
+                    <h3>Conta Ativa</h3>
+                    <input type="text" id="serverInput" placeholder="Servidor (ex: br144)" value="br144">
+                    <input type="text" id="nickInput" placeholder="Nick (ex: Player)" value="">
+                    <button onclick="loadAccount()">Carregar Conta</button>
+                    <button onclick="newAccount()" class="btn-secondary">Nova Conta</button>
+                </div>
+
+                <h3>Módulos</h3>
+                <ul class="module-list" id="moduleList"></ul>
+
+                <div style="margin-top: 30px;">
+                    <h3>Ações</h3>
+                    <button onclick="exportConfig()">📥 Exportar Config</button>
+                    <button onclick="document.getElementById('importInput').click(); return false;">📤 Importar Config</button>
+                    <input type="file" id="importInput" style="display:none;" onchange="importConfig(event)">
+                </div>
+            </div>
+
+            <div class="main-content">
+                <div id="alertBox"></div>
+                <div id="moduleEditors"></div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>TW Suite v0.9.0 | Sincronize com Tampermonkey exportando/importando configurações</p>
+        </div>
+    </div>
+
+    <script>
+        const MODULES = [
+            { id: 'auto-farm', name: 'Auto Farm', desc: 'Descoberta e envio de ataques com modelos de tropas' },
+            { id: 'scheduler', name: 'Agendador', desc: 'Fila persistente de ataques agendados' },
+            { id: 'auto-recruit', name: 'Auto Recrutamento', desc: 'Recruta tropas automaticamente' },
+            { id: 'auto-collect', name: 'Coleta Automática', desc: 'Coleta/desbloqueia na tela de saque' },
+            { id: 'notif-discord', name: 'Notificações Discord', desc: 'Alertas via webhook do Discord' },
+            { id: 'resource-balancer', name: 'Balanceador', desc: 'Distribui recursos entre aldeias' },
+            { id: 'mega-builder', name: 'Mega Construtor', desc: 'Constrói automaticamente' },
+            { id: 'mass-collect', name: 'Coleta em Massa', desc: 'Coleta todos os alvos de farm' },
+            { id: 'auto-defense', name: 'Auto Defesa', desc: 'Mobiliza tropas quando ataque chega' }
+        ];
+
+        let currentAccount = {};
+        let config = {};
+
+        function init() {
+            renderModuleList();
+            renderModuleEditors();
+            loadAccount();
+        }
+
+        function renderModuleList() {
+            const list = document.getElementById('moduleList');
+            list.innerHTML = MODULES.map(m => `
+                <li class="module-item" onclick="selectModule('${m.id}')">
+                    <span class="module-status" id="status-${m.id}"></span>
+                    ${m.name}
+                </li>
+            `).join('');
+            selectModule(MODULES[0].id);
+        }
+
+        function renderModuleEditors() {
+            const container = document.getElementById('moduleEditors');
+            container.innerHTML = MODULES.map(m => `
+                <div class="module-editor" id="editor-${m.id}">
+                    <h2>${m.name}</h2>
+                    <p style="margin-bottom: 20px; color: #666;">${m.desc}</p>
+
+                    <div class="settings-group">
+                        <label>
+                            <div class="toggle-switch">
+                                <input type="checkbox" id="enabled-${m.id}" onchange="updateConfig()">
+                                <span>Módulo Habilitado</span>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="settings-group">
+                        <label>Configurações (JSON)</label>
+                        <textarea id="config-${m.id}" onchange="updateConfig()"></textarea>
+                    </div>
+
+                    <div class="button-group">
+                        <button class="btn-primary" onclick="saveConfig()">💾 Salvar</button>
+                        <button class="btn-secondary" onclick="resetToDefaults('${m.id}')">🔄 Restaurar Padrão</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function selectModule(moduleId) {
+            document.querySelectorAll('.module-item').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.module-editor').forEach(el => el.classList.remove('active'));
+            document.querySelector(`.module-item:has-selector([onclick*="${moduleId}"])`);
+            event?.target?.closest('.module-item').classList.add('active');
+            document.getElementById(`editor-${moduleId}`).classList.add('active');
+            loadModuleConfig(moduleId);
+        }
+
+        function loadAccount() {
+            const server = document.getElementById('serverInput').value || 'br144';
+            const nick = document.getElementById('nickInput').value || 'Player';
+            currentAccount = { server, nick };
+            loadConfig();
+            updateStatus();
+            showAlert(`Conta selecionada: ${server} - ${nick}`, 'success');
+        }
+
+        function newAccount() {
+            const server = prompt('Servidor (ex: br144):', 'br144');
+            const nick = prompt('Nick (ex: Player):', '');
+            if (server && nick) {
+                document.getElementById('serverInput').value = server;
+                document.getElementById('nickInput').value = nick;
+                config = {};
+                MODULES.forEach(m => {
+                    config[m.id] = { enabled: false };
+                });
+                loadAccount();
+                showAlert(`Nova conta criada: ${server} - ${nick}`, 'success');
+            }
+        }
+
+        function loadConfig() {
+            const key = `tw-suite-config:${currentAccount.server}:${currentAccount.nick}`;
+            const saved = localStorage.getItem(key);
+            config = saved ? JSON.parse(saved) : {};
+            MODULES.forEach(m => {
+                if (!config[m.id]) {
+                    config[m.id] = { enabled: false };
+                }
+            });
+            updateEditors();
+        }
+
+        function updateEditors() {
+            MODULES.forEach(m => {
+                const enabled = document.getElementById(`enabled-${m.id}`);
+                const configTA = document.getElementById(`config-${m.id}`);
+                enabled.checked = config[m.id]?.enabled || false;
+                configTA.value = JSON.stringify(config[m.id], null, 2);
+            });
+        }
+
+        function updateConfig() {
+            // Atualizar ao vivo, sem salvar ainda
+        }
+
+        function loadModuleConfig(moduleId) {
+            if (!config[moduleId]) {
+                config[moduleId] = { enabled: false };
+            }
+            document.getElementById(`enabled-${moduleId}`).checked = config[moduleId].enabled;
+            document.getElementById(`config-${moduleId}`).value = JSON.stringify(config[moduleId], null, 2);
+        }
+
+        function saveConfig() {
+            try {
+                MODULES.forEach(m => {
+                    const enabled = document.getElementById(`enabled-${m.id}`).checked;
+                    const configJSON = document.getElementById(`config-${m.id}`).value;
+                    config[m.id] = JSON.parse(configJSON);
+                    config[m.id].enabled = enabled;
+                });
+
+                const key = `tw-suite-config:${currentAccount.server}:${currentAccount.nick}`;
+                localStorage.setItem(key, JSON.stringify(config));
+                updateStatus();
+                showAlert('Configuração salva com sucesso!', 'success');
+            } catch (e) {
+                showAlert(`Erro ao salvar: ${e.message}`, 'error');
+            }
+        }
+
+        function updateStatus() {
+            MODULES.forEach(m => {
+                const status = document.getElementById(`status-${m.id}`);
+                if (config[m.id]?.enabled) {
+                    status.classList.add('enabled');
+                } else {
+                    status.classList.remove('enabled');
+                }
+            });
+        }
+
+        function resetToDefaults(moduleId) {
+            if (confirm('Restaurar configurações padrão deste módulo?')) {
+                config[moduleId] = { enabled: false };
+                loadModuleConfig(moduleId);
+                saveConfig();
+                showAlert('Padrões restaurados!', 'success');
+            }
+        }
+
+        function exportConfig() {
+            const key = `tw-suite-config:${currentAccount.server}:${currentAccount.nick}`;
+            const data = {
+                account: currentAccount,
+                config: config,
+                exportedAt: new Date().toISOString()
+            };
+
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `tw-suite-${currentAccount.server}-${currentAccount.nick}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            showAlert('Configuração exportada!', 'success');
+        }
+
+        function importConfig(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    currentAccount = data.account;
+                    config = data.config;
+
+                    document.getElementById('serverInput').value = currentAccount.server;
+                    document.getElementById('nickInput').value = currentAccount.nick;
+
+                    const key = `tw-suite-config:${currentAccount.server}:${currentAccount.nick}`;
+                    localStorage.setItem(key, JSON.stringify(config));
+
+                    updateEditors();
+                    updateStatus();
+                    showAlert(`Configuração importada para ${currentAccount.server} - ${currentAccount.nick}`, 'success');
+                } catch (err) {
+                    showAlert(`Erro ao importar: ${err.message}`, 'error');
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        function showAlert(message, type) {
+            const box = document.getElementById('alertBox');
+            box.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+            setTimeout(() => { box.innerHTML = ''; }, 4000);
+        }
+
+        init();
+    </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      0.9.0
+// @version      1.0.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -467,10 +467,53 @@
     await moduleLoader.runAll();
   }
 
+  // Injetar link pro dashboard no menu nativo
+  function injectDashboardLink() {
+    const menuRow = document.getElementById('menu_row') || document.getElementById('menu_row2');
+    if (!menuRow) return;
+
+    const dashLink = document.createElement('a');
+    dashLink.href = '#';
+    dashLink.textContent = 'Dashboard TW Suite';
+    dashLink.style.cssText = `
+      padding: 0 10px;
+      color: #fff;
+      text-decoration: none;
+      cursor: pointer;
+      display: inline-block;
+      margin: 0 5px;
+    `;
+    dashLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      openDashboard();
+    });
+    menuRow.appendChild(dashLink);
+  }
+
+  function openDashboard() {
+    // Abre o dashboard em nova aba
+    window.open('about:blank', 'tw-suite-dashboard', 'width=1200,height=700');
+    const win = window.open('', 'tw-suite-dashboard');
+    if (win) {
+      const dashboardHTML = localStorage.getItem('tw-suite:dashboard-html');
+      if (dashboardHTML) {
+        win.document.write(dashboardHTML);
+        win.document.close();
+      } else {
+        win.document.write('<p>Dashboard não encontrado. Baixe o dashboard.html do repositório.</p>');
+        win.document.close();
+      }
+    }
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootstrap);
+    document.addEventListener('DOMContentLoaded', () => {
+      bootstrap();
+      injectDashboardLink();
+    });
   } else {
     bootstrap();
+    injectDashboardLink();
   }
 })();
 
