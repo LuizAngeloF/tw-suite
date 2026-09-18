@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.6.0
+// @version      1.6.1
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1296,28 +1296,44 @@
   // UNVERIFIED: screen=info_command é a tela padrão de "Visão geral de comandos"
   // do Tribal Wars clássico; formato exato da tabela nunca confirmado ao vivo
   // neste mundo. Falha aqui não deve quebrar o resto do snapshot.
+  // Lê o widget "Próprios comandos" / "Comandos chegando" — CONFIRMADO ao
+  // vivo (2026-09-20, HTML real mandado pelo usuário) pro caso outgoing:
+  // aparece na tela principal da aldeia (screen=main), dentro de
+  // #commands_outgoings > table.vis, uma <tr class="command-row"> por
+  // comando, com o horário de chegada em `[data-endtime]` (epoch em
+  // segundos) e o tipo em `.command_hover_details[data-command-type]`
+  // ("attack"/outros). O incoming usa o mesmo template (id
+  // #commands_incomings) — não confirmado diretamente, mas é o mesmo widget
+  // do jogo, alta confiança por simetria.
+  function parseCommandsWidget(doc, containerId) {
+    const container = doc.querySelector(`#${containerId}`);
+    if (!container) return [];
+    const now = TW.serverTime.now();
+    const out = [];
+    for (const tr of container.querySelectorAll('tr.command-row')) {
+      const endEl = tr.querySelector('[data-endtime]');
+      if (!endEl) continue;
+      const arrivesAtMs = Number(endEl.getAttribute('data-endtime')) * 1000;
+      const labelEl = tr.querySelector('.quickedit-label');
+      const hintEl = tr.querySelector('.command_hover_details');
+      out.push({
+        etaMs: Math.max(0, arrivesAtMs - now),
+        arrivesAtMs,
+        label: labelEl ? labelEl.textContent.replace(/\s+/g, ' ').trim() : null,
+        kind: (hintEl && hintEl.getAttribute('data-command-type')) || 'other',
+      });
+    }
+    out.sort((a, b) => a.etaMs - b.etaMs);
+    return out;
+  }
+
   async function getIncomingAttacks(vid) {
     try {
-      const { doc } = await getPage(`/game.php?village=${vid}&screen=info_command&type=incomings&mode=incomings`);
-      const rows = [...doc.querySelectorAll('#commands_incomings tr, .quickbar-active tr, table.command-table tr')]
-        .filter((tr) => tr.querySelector('.relative_time, [data-duration]'));
-      const out = [];
-      for (const tr of rows) {
-        const durEl = tr.querySelector('.relative_time[data-duration], [data-duration]');
-        const originEl = tr.querySelector('a[href*="info_village"]');
-        const isAttack = /att|nuke|spear|sword|axe/i.test(tr.className) || !!tr.querySelector('img[src*="att"]');
-        if (!durEl) continue;
-        out.push({
-          etaMs: Number(durEl.getAttribute('data-duration')) * 1000,
-          origin: originEl ? originEl.textContent.trim() : null,
-          kind: isAttack ? 'attack' : 'other',
-        });
-      }
-      out.sort((a, b) => a.etaMs - b.etaMs);
-      return out;
+      const { doc } = await getPage(`/game.php?village=${vid}&screen=main`);
+      return parseCommandsWidget(doc, 'commands_incomings');
     } catch (e) {
       if (e instanceof BotCheckError) throw e;
-      return null; // tela pode não existir/mudar de nome — não derruba o snapshot
+      return null; // widget pode não existir nesta conta/tela — não derruba o snapshot
     }
   }
 
@@ -1330,30 +1346,13 @@
     }
   }
 
-  // Comandos que EU enviei e ainda estão viajando (ataque/apoio) — mesma
-  // tela do getIncomingAttacks, só com type=outgoings. Sem isso não dava
-  // pra ver na tela nem no dashboard que o Auto Farm realmente mandou algo,
-  // só o efeito colateral (alvo sumindo da lista). UNVERIFIED, mesmo
-  // aviso do getIncomingAttacks: nome/formato da tela nunca confirmados.
+  // Comandos que EU enviei e ainda estão viajando (ataque/apoio). Sem isso
+  // não dava pra ver na tela nem no dashboard que o Auto Farm realmente
+  // mandou algo, só o efeito colateral (alvo sumindo da lista).
   async function getOutgoingCommands(vid) {
     try {
-      const { doc } = await getPage(`/game.php?village=${vid}&screen=info_command&type=outgoings&mode=outgoings`);
-      const rows = [...doc.querySelectorAll('#commands_outgoings tr, table.command-table tr')]
-        .filter((tr) => tr.querySelector('.relative_time, [data-duration]'));
-      const out = [];
-      for (const tr of rows) {
-        const durEl = tr.querySelector('.relative_time[data-duration], [data-duration]');
-        const destEl = tr.querySelector('a[href*="info_village"]');
-        const isAttack = /att|nuke|spear|sword|axe/i.test(tr.className) || !!tr.querySelector('img[src*="att"]');
-        if (!durEl) continue;
-        out.push({
-          etaMs: Number(durEl.getAttribute('data-duration')) * 1000,
-          destination: destEl ? destEl.textContent.trim() : null,
-          kind: isAttack ? 'attack' : 'other',
-        });
-      }
-      out.sort((a, b) => a.etaMs - b.etaMs);
-      return out;
+      const { doc } = await getPage(`/game.php?village=${vid}&screen=main`);
+      return parseCommandsWidget(doc, 'commands_outgoings');
     } catch (e) {
       if (e instanceof BotCheckError) throw e;
       return null;
@@ -1378,22 +1377,33 @@
     return rows;
   }
 
-  // Fila de recrutamento — mesma ideia do readBuildQueue, mas nas telas de
-  // treino (quartel/estábulo/oficina). UNVERIFIED: supõe uma tabela
-  // #trainqueue com o mesmo estilo de linha (nome + tempo restante); nunca
-  // confirmado ao vivo. Busca as 3 telas em paralelo; qualquer uma que
-  // falhar (ex.: edifício não construído) simplesmente não contribui linhas.
+  // Fila de recrutamento nas telas de treino (quartel/estábulo/oficina) —
+  // CONFIRMADO ao vivo (2026-09-20, HTML real mandado pelo usuário, tela do
+  // quartel): o container é `#trainqueue_wrap_<edifício>`, com DUAS <tbody>
+  // dentro da mesma tabela — a primeira (sem id, linha `.lit`) é a unidade
+  // em treino agora, a segunda (`#trainqueue_<edifício>`) é a fila atrás
+  // dela, mesmo formato de linha nas duas. A unidade não vem como texto
+  // "10x Lanceiro" (como eu tinha suposto) — vem como `1 Lanceiro` com um
+  // `<div class="unit_sprite ... <código-da-unidade>">` do lado, então lemos
+  // o tipo da tropa pela classe do sprite (mais confiável que ler o rótulo
+  // em português). A última linha da fila ("Cancelar tudo") não tem 3 <td>
+  // úteis e é ignorada.
   async function readTrainQueueForBuilding(vid, building, label) {
     try {
       const { doc } = await getPage(`/game.php?village=${vid}&screen=${building}`);
+      const container = doc.querySelector(`#trainqueue_wrap_${building}`) || doc.querySelector('.trainqueue_wrap');
+      if (!container) return [];
       const rows = [];
-      for (const tr of doc.querySelectorAll('#trainqueue tr, .trainqueue tr')) {
-        const cells = [...tr.querySelectorAll('td')].map((td) => td.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
-        if (!cells.length) continue;
-        const remaining = cells.find((c) => /^\d{1,2}:\d{2}:\d{2}$/.test(c));
-        if (!remaining) continue; // linha de cabeçalho ou sem countdown — ignora
-        const countMatch = cells[0].match(/(\d+)\s*x/i);
-        rows.push({ building: label, name: cells[0], count: countMatch ? Number(countMatch[1]) : null, remaining });
+      for (const tr of container.querySelectorAll('tbody tr')) {
+        const cells = tr.querySelectorAll('td');
+        if (cells.length < 3) continue; // cabeçalho ou linha "Cancelar tudo"
+        const remaining = cells[1].textContent.trim();
+        if (!/^\d{1,2}:\d{2}:\d{2}$/.test(remaining)) continue;
+        const spriteEl = tr.querySelector('[class*="unit_sprite"]');
+        const unit = spriteEl ? UNITS.find((u) => spriteEl.classList.contains(u)) : null;
+        const countText = cells[0].textContent.replace(/\s+/g, ' ').trim();
+        const countMatch = countText.match(/^(\d+)/);
+        rows.push({ building: label, unit, name: countText, count: countMatch ? Number(countMatch[1]) : null, remaining });
       }
       return rows;
     } catch {
