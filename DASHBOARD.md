@@ -69,6 +69,10 @@ Novo cartão **Histórico**, logo abaixo do "Ao vivo": três gráficos com os ú
 
 O editor de fila do módulo **Construção** agora esconde passos cujo nível você já ultrapassou (ex.: "Bosque → nv.1" some se o Bosque já estiver no nível 10) — antes mostrava o plano inteiro, mesmo com passos antigos já satisfeitos. Uma notinha avisa quantos passos estão ocultos.
 
+## Status da Coleta (v1.9.0)
+
+O cartão "Ao vivo" agora mostra o que está acontecendo na Coleta: cada opção (Pequena/Média/Grande/Extrema) aparece como "livre" ou com as tropas que saíram e uma contagem regressiva ao vivo até voltar — as opções ainda bloqueadas não aparecem. Antes o card só mostrava uma frase genérica tipo "todas as coletas em andamento", sem detalhe nenhum.
+
 ## Se não sincronizar
 
 1. **Primeiro, use `start-dashboard.bat`** em vez do arquivo direto — resolve a maioria dos casos, porque tira a permissão de arquivo local da equação inteira.

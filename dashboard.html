@@ -1592,6 +1592,13 @@ function liveHTML(key) {
     });
   const incomingHTML = queueBlock('Chegando', 'shield', (s.incoming || []).filter((c) => c.arrivesAtMs > now),
     (c) => `<div class="livequeue-row"><span>⚠ ${esc(c.label || 'comando')}</span><span class="mono">${esc(fmtCountdown(c.arrivesAtMs - now))}</span></div>`);
+  const scavengeHTML = queueBlock('Coletando', 'basket', (s.scavenge || []).filter((o) => !o.locked),
+    (o) => {
+      if (!o.busy) return `<div class="livequeue-row"><span>Opção ${o.id}</span><span class="mono">livre</span></div>`;
+      const returned = o.returnAtMs != null && o.returnAtMs <= now;
+      const unitsTxt = o.units ? Object.entries(o.units).filter(([, n]) => n > 0).map(([u, n]) => `${n} ${unitLabel(u)}`).join(', ') : '';
+      return `<div class="livequeue-row"><span>Opção ${o.id}${unitsTxt ? ` · ${esc(unitsTxt)}` : ''}</span><span class="mono">${esc(returned ? 'de volta' : fmtCountdown(o.returnAtMs - now))}</span></div>`;
+    });
   const battleHTML = queueBlock('Relatórios de ataque', 'basket', s.battleLog,
     (b) => {
       const resIcon = b.resultIcon === 'green' ? '✅' : b.resultIcon === 'yellow' ? '⚠️' : '❔';
@@ -1608,7 +1615,7 @@ function liveHTML(key) {
         ${tags}
         <span class="note" style="margin-left:auto">atualizado ${esc(ago(s.at || s.buildQueueAt || s.lastSeen))}</span>
       </div>
-      ${resourcesHTML}${troopsHTML}${buildHTML}${trainHTML}${outgoingHTML}${incomingHTML}${battleHTML}
+      ${resourcesHTML}${troopsHTML}${buildHTML}${trainHTML}${scavengeHTML}${outgoingHTML}${incomingHTML}${battleHTML}
     </div>`;
 }
 

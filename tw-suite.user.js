@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.8.0
+// @version      1.9.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1424,6 +1424,45 @@
     return [...barracks, ...stable, ...garage];
   }
 
+  // Status da Coleta (screen=place&mode=scavenge) — CONFIRMADO ao vivo
+  // (2026-09-20, JS real mandado pelo usuário, antes e depois de clicar pra
+  // coletar). A tela não é HTML estático: o conteúdo visível é montado por
+  // JS a partir de `var village = {...}` embutido no <script> da própria
+  // página — igual ao `game_data`, então dá pra ler por texto sem executar
+  // nada (mesma técnica de `gameDataFromHtml`). Cada opção (1-4, "Pequena"
+  // até "Extrema Coleta") tem `is_locked` e, se ocupada, `scavenging_squad`
+  // com `return_time` (epoch em SEGUNDOS — precisa ×1000), `unit_counts` e
+  // `loot_res`. Antes disso o módulo de Coleta lia esses mesmos dados só
+  // pra decidir enviar ou não, e descartava tudo — por isso o card não
+  // mostrava nada além de "todas em andamento".
+  function parseScavengeVillageData(text) {
+    const m = text.match(/var village = (\{.+?\});/s);
+    if (!m) return null;
+    try { return JSON.parse(m[1]); } catch { return null; }
+  }
+
+  async function getScavengeStatus(vid) {
+    try {
+      const { text } = await getPage(`/game.php?village=${vid}&screen=place&mode=scavenge`);
+      const data = parseScavengeVillageData(text);
+      if (!data || !data.options) return null;
+      return Object.entries(data.options).map(([id, o]) => {
+        const squad = o.scavenging_squad;
+        return {
+          id: Number(id),
+          locked: !!o.is_locked,
+          busy: !!squad,
+          returnAtMs: squad ? squad.return_time * 1000 : null,
+          units: squad ? squad.unit_counts : null,
+          loot: squad ? squad.loot_res : null,
+        };
+      });
+    } catch (e) {
+      if (e instanceof BotCheckError) throw e;
+      return null;
+    }
+  }
+
   // "0:11:31" / "0:04:15" → ms. Usado pra transformar o texto de contagem
   // regressiva (que já vem formatado do jogo) num horário-alvo absoluto, pra
   // dar pra manter um relógio rodando localmente entre sincronizações, em
@@ -1438,12 +1477,13 @@
     const g = gd();
     if (!g || !g.village) return null;
     const vid = g.village.id;
-    const [troops, incoming, outgoing, buildQueue, trainQueue] = await Promise.all([
+    const [troops, incoming, outgoing, buildQueue, trainQueue, scavenge] = await Promise.all([
       troopsHome(vid).catch(() => null),
       getIncomingAttacks(vid).catch(() => null),
       getOutgoingCommands(vid).catch(() => null),
       getPage(`/game.php?village=${vid}&screen=main`).then((p) => readBuildQueue(p.doc)).catch(() => null),
       getTrainQueue(vid).catch(() => null),
+      getScavengeStatus(vid).catch(() => null),
     ]);
     const now = TW.serverTime.now();
     const withEta = (list) => list ? list.map((item) => {
@@ -1470,6 +1510,8 @@
       buildQueueAt: buildQueue ? Date.now() : undefined,
       trainQueue: withEta(trainQueue),
       trainQueueAt: trainQueue ? Date.now() : undefined,
+      scavenge,
+      scavengeAt: scavenge ? Date.now() : undefined,
     };
   }
 
@@ -1580,7 +1622,7 @@
     prepareCommand, confirmCommand, sendCommand, availableUnits, listCancelableCommands, cancelLinks, cancelCommand,
     sendResources, premiumExchange, premiumExchangeRates, getVillageIndex, myVillages, parseGameTime, formatServerTime, serverWallOffsetMs, worldConfig,
     notify, acquireLock, loop, h, card, parseUnitList, getIncomingAttacks, getOutgoingCommands, troopsHome,
-    readBuildQueue, getTrainQueue, buildLiveSnapshot, getAttackReportsList, getAttackReportDetail,
+    readBuildQueue, getTrainQueue, buildLiveSnapshot, getAttackReportsList, getAttackReportDetail, getScavengeStatus,
   };
 })();
 
@@ -1633,11 +1675,13 @@
       const buildHost = S.h('div', { class: 'tws-list' });
       const trainHost = S.h('div', { class: 'tws-list' });
       const cmdHost = S.h('div', { class: 'tws-list' });
+      const scavengeHost = S.h('div', { class: 'tws-list' });
       ui.body.append(
         resHost,
         S.h('div', { style: { fontWeight: 'bold', fontSize: '10px', marginTop: '4px' }, text: 'Construindo' }), buildHost,
         S.h('div', { style: { fontWeight: 'bold', fontSize: '10px', marginTop: '4px' }, text: 'Recrutando' }), trainHost,
         S.h('div', { style: { fontWeight: 'bold', fontSize: '10px', marginTop: '4px' }, text: 'Comandos' }), cmdHost,
+        S.h('div', { style: { fontWeight: 'bold', fontSize: '10px', marginTop: '4px' }, text: 'Coletando' }), scavengeHost,
       );
 
       // `lastSnap` é redesenhado a cada segundo (renderTick), sem refazer
@@ -1670,6 +1714,16 @@
           cmdLines.push(`⚠ ${c.label || 'comando'} chegando em ${fmtCountdown(c.arrivesAtMs - now)}`);
         }
         renderList(cmdHost, cmdLines, 'Nenhum comando ativo.');
+
+        const scavengeLines = [];
+        for (const s of (lastSnap.scavenge || [])) {
+          if (s.locked) continue;
+          if (!s.busy) { scavengeLines.push(`Opção ${s.id}: livre`); continue; }
+          const unitsTxt = s.units ? Object.entries(s.units).filter(([, n]) => n > 0).map(([u, n]) => `${n} ${S.UNIT_LABELS[u] || u}`).join(', ') : '';
+          const returned = s.returnAtMs != null && s.returnAtMs <= now;
+          scavengeLines.push(`Opção ${s.id}: ${returned ? 'de volta' : `volta em ${fmtCountdown(s.returnAtMs - now)}`}${unitsTxt ? ` (${unitsTxt})` : ''}`);
+        }
+        renderList(scavengeHost, scavengeLines, 'Nenhuma opção de coleta disponível.');
       }
       setInterval(renderTick, 1000);
 

@@ -199,6 +199,20 @@ Pedido do usuário depois de testar o v1.7.0 ao vivo: contagem de "2 a caminho" 
 
 **Decisão de arquitetura**: o gráfico fica num cartão separado (`#chartBox`), atualizado só na sincronização normal (~20s) — **não** dentro do relógio ao vivo que redesenha a cada 1s (`#liveBox`), pra não piscar nem perder um hover em andamento no gráfico.
 
+## Fase 12 — v1.9.0: status da Coleta (finalmente)
+
+Pedido pendente desde a Fase 11: o card de Coleta não mostrava informação nenhuma (só "todas as coletas em andamento", truncado na UI). Usuário mandou o HTML/JS real da tela `screen=place&mode=scavenge` — **antes** e **depois** de clicar pra coletar, exatamente o par de estados que faltava pra confirmar o parser com confiança.
+
+Achado principal: a tela de Coleta não é HTML estático — o conteúdo visível (`#scavenge_screen`) é montado inteiramente por JS client-side a partir de um objeto `var village = {...}` embutido no `<script>` da própria página (igual ao `game_data`, mesma técnica de leitura por texto/regex, sem precisar executar nada). O módulo antigo (`scavengeVillage`, `villageDataFrom`) já lia esse mesmo objeto — só que **descartava tudo** depois de decidir enviar ou não, inclusive o campo `scavenging_squad` que tem exatamente o que faltava: `return_time` (epoch em segundos — quando a coleta volta), `unit_counts` (quais tropas foram) e `loot_res` (saque esperado).
+
+Novo `getScavengeStatus(vid)` em `shared.js` (duplica a mesma regex de 3 linhas do `villageDataFrom`, de propósito — funções em IIFEs diferentes do mesmo arquivo, mais simples que reestruturar o módulo de envio só por isso) — devolve as 4 opções (1-4, "Pequena" até "Extrema Coleta") com `locked`/`busy`/`returnAtMs`/`units`/`loot`. Entra em `buildLiveSnapshot()` como mais um item do `Promise.all` (6º fetch por ciclo agora, junto de troops/incoming/outgoing/buildQueue/trainQueue — mais uma requisição por ciclo, aceito conscientemente dado o ritmo de pedidos do usuário nesta leva).
+
+**Testado com Playwright/Node direto contra os dois JSONs reais (antes/depois) antes de aplicar**: extraiu certo os 4 estados de "antes" (1 livre, 3 travadas) e o estado "depois" (opção 1 ocupada com 10 Espadachins, retorno em epoch, saque 5/5/5). Depois testado de novo no dashboard com dado simulado, incluindo o relógio ao vivo (mesmo `fmtCountdown` já usado pra construção/recrutamento/comandos) contando o retorno da coleta em tempo real.
+
+Painel do jogo (`live-status`) e dashboard (`liveHTML`) ganham a seção "Coletando", mesmo padrão visual das outras — opções bloqueadas ficam ocultas, ociosas mostram "livre", ocupadas mostram as tropas e a contagem regressiva.
+
+**Escopo desta versão**: só leitura/exibição de status — não mudei a lógica de ENVIO da Coleta (`scavengeVillage`), que continua a mesma, ainda UNVERIFIED contra o jogo real (o usuário clicou manualmente pra coletar nas capturas, não foi o módulo automático que enviou).
+
 ## Fases futuras (ainda não implementadas)
 
 - Auto Defesa: ainda no formato antigo (detecta "ataque" como texto solto na página — falso-positivo praticamente garantido). Candidato a reescrever com o mesmo parser de `info_command` do live-status, uma vez confirmado.
