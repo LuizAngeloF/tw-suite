@@ -141,6 +141,16 @@ Pedido do usuário: revisão geral após relatar vários problemas de uma vez �
 
 **Nada deste lote foi testado contra o jogo ao vivo**, exceto onde marcado VERIFIED acima — todos nascem em modo teste. `node --check` passou nos dois arquivos; a UI foi testada via navegador com uma ponte simulada do Tampermonkey (sem extensão real), o que confirma a lógica de renderização/persistência mas não o comportamento HTTP real do jogo.
 
+## Fase 8.1 — v1.6.1 a v1.6.3: correções contra o jogo real (primeira conta ao vivo)
+
+Primeira vez que alguém testou o lote de v1.6.0 contra uma conta de verdade (`br144:promiss`). Os dois pontos marcados UNVERIFIED na Fase 8 (fila de recrutamento e comandos a caminho) estavam de fato errados — usuário mandou o HTML real das telas, permitindo corrigir com confiança em vez de continuar chutando:
+
+- **Fila de recrutamento (v1.6.1)**: eu tinha suposto uma tabela `#trainqueue` com linhas tipo "10x Lanceiro". O real: container `#trainqueue_wrap_<edifício>` com duas `<tbody>` (a unidade treinando agora + a fila atrás dela), e o texto da linha é `"1 Lanceiro"` sem "x" — o tipo da tropa vem da classe do ícone (`unit_sprite ... spear/sword/...`), não do texto. Testado com Playwright direto contra o HTML real antes de aplicar (2/2 linhas extraídas certas). **VERIFIED** — usuário confirmou aparecendo certo no painel do jogo e no dashboard depois do fix.
+- **Comandos a caminho (v1.6.3)**: o parser em si (`#commands_outgoings` → `tr.command-row` → `[data-endtime]`) sempre esteve certo — o erro era a **tela**: eu buscava `screen=main` (tela de Edifício principal), mas esse widget vive em `screen=overview` (Visualização geral, com o mapa visual da aldeia). Confirmado duas vezes com HTML real do usuário (2 comandos, depois 4). Trocada a URL em `getIncomingAttacks`/`getOutgoingCommands`. **Correção aplicada, aguardando confirmação do usuário em uso real** (o parser já foi testado isolado, só a busca pela tela certa que não tinha como testar sem sessão ao vivo).
+- **Ciclo do "Ao vivo" (v1.6.2)**: reduzido de 35-55s pra 15-25s a pedido do usuário, depois de confirmar que a "demora" era só o intervalo do ciclo, não um bug de sincronização.
+
+**Lição pro processo**: a suposição errada de tela (`screen=main` vs `screen=overview`) não teria sido pega só lendo código — só apareceu comparando contra o `view-source` real, que é exatamente o motivo desse projeto insistir em marcar tudo como UNVERIFIED até alguém testar contra o jogo de verdade.
+
 ## Fase 9 — Multi Contas (companion app separado, Fase A)
 
 Pedido do usuário: reproduzir a categoria "Multi Contas" de concorrentes (cadastro/login em lote, proxy por conta, automação em massa, tribo automática, barbarização automática), aceitando explicitamente guardar senha localmente pra isso — algo que o resto do projeto tinha decidido evitar. Ver plano completo em `multi-contas/docs/MULTI-CONTAS.md`.

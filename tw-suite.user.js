@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.6.2
+// @version      1.6.3
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1297,14 +1297,17 @@
   // do Tribal Wars clássico; formato exato da tabela nunca confirmado ao vivo
   // neste mundo. Falha aqui não deve quebrar o resto do snapshot.
   // Lê o widget "Próprios comandos" / "Comandos chegando" — CONFIRMADO ao
-  // vivo (2026-09-20, HTML real mandado pelo usuário) pro caso outgoing:
-  // aparece na tela principal da aldeia (screen=main), dentro de
-  // #commands_outgoings > table.vis, uma <tr class="command-row"> por
-  // comando, com o horário de chegada em `[data-endtime]` (epoch em
-  // segundos) e o tipo em `.command_hover_details[data-command-type]`
-  // ("attack"/outros). O incoming usa o mesmo template (id
-  // #commands_incomings) — não confirmado diretamente, mas é o mesmo widget
-  // do jogo, alta confiança por simetria.
+  // vivo duas vezes (2026-09-20, HTML real mandado pelo usuário, com 2 e
+  // depois 4 comandos reais): fica em `screen=overview` (a "Visualização
+  // geral" da aldeia, com o mapa visual) — **não** em `screen=main` (que é
+  // só a tela de Edifício principal). Essa troca de tela era o bug real:
+  // o parser em si sempre esteve certo (`#commands_outgoings` >
+  // `tr.command-row` > `[data-endtime]`), só buscava a página errada, então
+  // nunca achava o container e voltava lista vazia. O incoming usa o mesmo
+  // template (id #commands_incomings), dentro de um widget colapsado por
+  // padrão quando não há nada chegando — não confirmado com um ataque
+  // chegando de verdade ainda, mas é o mesmo widget do jogo, alta confiança
+  // por simetria com o outgoing.
   function parseCommandsWidget(doc, containerId) {
     const container = doc.querySelector(`#${containerId}`);
     if (!container) return [];
@@ -1329,7 +1332,7 @@
 
   async function getIncomingAttacks(vid) {
     try {
-      const { doc } = await getPage(`/game.php?village=${vid}&screen=main`);
+      const { doc } = await getPage(`/game.php?village=${vid}&screen=overview`);
       return parseCommandsWidget(doc, 'commands_incomings');
     } catch (e) {
       if (e instanceof BotCheckError) throw e;
@@ -1351,7 +1354,7 @@
   // mandou algo, só o efeito colateral (alvo sumindo da lista).
   async function getOutgoingCommands(vid) {
     try {
-      const { doc } = await getPage(`/game.php?village=${vid}&screen=main`);
+      const { doc } = await getPage(`/game.php?village=${vid}&screen=overview`);
       return parseCommandsWidget(doc, 'commands_outgoings');
     } catch (e) {
       if (e instanceof BotCheckError) throw e;
