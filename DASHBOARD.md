@@ -73,6 +73,15 @@ O editor de fila do módulo **Construção** agora esconde passos cujo nível vo
 
 O cartão "Ao vivo" agora mostra o que está acontecendo na Coleta: cada opção (Pequena/Média/Grande/Extrema) aparece como "livre" ou com as tropas que saíram e uma contagem regressiva ao vivo até voltar — as opções ainda bloqueadas não aparecem. Antes o card só mostrava uma frase genérica tipo "todas as coletas em andamento", sem detalhe nenhum.
 
+## Ajustes depois do primeiro uso real (v1.10.0)
+
+- **Cada seção do "Ao vivo" agora pode ser recolhida** — clique no título (Construindo/Recrutando/Coletando/Comandos enviados/Chegando/Relatórios de ataque) pra esconder ou mostrar.
+- **Relatórios de ataque viraram uma tabela de verdade**, com o saque por recurso em colunas e a perda mostrando a tropa exata (ex.: "2 Lanceiro", não só "2").
+- **"Retorno de \<aldeia\>"** (suas próprias tropas voltando) agora aparece em "Chegando", não mais em "Comandos enviados".
+- **"Histórico" vazio mesmo com relatórios na lista** — corrigido: se você já tinha relatórios de antes do gráfico existir, eles agora entram na agregação automaticamente, sem precisar de relatórios novos pra "destravar" o gráfico.
+- **Relógio do Recrutamento parado** — corrigido: agora funciona mesmo se o dado sincronizado ainda não tiver o campo mais novo.
+- **Metas de Recrutamento e tetos de Coleta/Coleta em Massa** foram pra dentro de "Ajustes finos" (antes ficavam sempre visíveis) e viraram slider + campo numérico lado a lado — dá pra arrastar ou digitar o valor exato.
+
 ## Se não sincronizar
 
 1. **Primeiro, use `start-dashboard.bat`** em vez do arquivo direto — resolve a maioria dos casos, porque tira a permissão de arquivo local da equação inteira.

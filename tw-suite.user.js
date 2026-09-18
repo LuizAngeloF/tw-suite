@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.9.0
+// @version      1.10.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1837,6 +1837,11 @@
       resultIcon: row.resultIcon,
       target: detail && detail.target ? detail.target.name : null,
       lostAtt, lostDef, lootTotal,
+      // Quantidade por tropa (não só o total) — pedido do usuário: "diz que
+      // perdeu dois, mas não informa qual foi a perda". Filtra pra não
+      // carregar unidades com 0 no log.
+      lostAttUnits: detail && detail.attackerLosses ? Object.fromEntries(Object.entries(detail.attackerLosses).filter(([, n]) => n > 0)) : null,
+      lostDefUnits: detail && detail.defenderLosses ? Object.fromEntries(Object.entries(detail.defenderLosses).filter(([, n]) => n > 0)) : null,
       loot: detail ? detail.loot : null,
       at: Date.now(),
     };
@@ -1851,7 +1856,8 @@
     for (const b of log.slice(0, 8)) {
       const icon = b.resultIcon === 'green' ? '✅' : b.resultIcon === 'yellow' ? '⚠️' : '❔';
       const lootTxt = b.loot ? ` · 🪵${b.loot.wood || 0} 🧱${b.loot.stone || 0} ⛏${b.loot.iron || 0}` : '';
-      const lossTxt = b.lostAtt ? ` · perdi ${b.lostAtt}` : '';
+      const unitTxt = (units) => units ? Object.entries(units).map(([u, n]) => `${n} ${S.UNIT_LABELS[u] || u}`).join(', ') : '';
+      const lossTxt = b.lostAtt ? ` · perdi ${unitTxt(b.lostAttUnits) || b.lostAtt}` : '';
       host.appendChild(S.h('div', { class: 'tws-row', text: `${icon} ${b.target || b.title || '?'}${lootTxt}${lossTxt}` }));
     }
   }
@@ -1881,6 +1887,16 @@
 
         let log = (await ctx.storage.get(`${MODULE_ID}:log`, [])) || [];
         let daily = (await ctx.storage.get(`${MODULE_ID}:daily`, {})) || {};
+        // Backfill de uma vez só: quem já tinha relatórios no log de antes do
+        // v1.8.0 (quando a agregação diária ainda não existia) ficava com o
+        // "Histórico" vazio pra sempre, porque só relatórios NOVOS entram em
+        // `daily` — os já processados nunca são reprocessados (é isso que a
+        // lista `seen` evita). Se `daily` está vazio mas já tem log, refaz a
+        // agregação a partir do que já existe, uma única vez.
+        if (!Object.keys(daily).length && log.length) {
+          for (const summary of log) addToDaily(daily, summary);
+          await ctx.storage.set(`${MODULE_ID}:daily`, daily);
+        }
         for (const row of newOnes) {
           const detail = await S.getAttackReportDetail(vid, row.id);
           const summary = summarize(row, detail);

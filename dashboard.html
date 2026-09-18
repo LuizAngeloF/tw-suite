@@ -310,6 +310,13 @@ kbd {
 .troop-chip small { font-family: var(--sans); color: var(--text-3); margin-left: 3px; }
 .livesub { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--text-2); margin: 10px 0 6px; }
 .livesub .ico { color: var(--ember); }
+.livesub-toggle { width: 100%; background: none; border: none; padding: 0; cursor: pointer; text-align: left; }
+.livesub-toggle span { flex: 1; }
+.live-chev { color: var(--text-3); transition: transform .15s; }
+.live-chev.open { transform: rotate(180deg); }
+.livequeue-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .18s ease; }
+.livequeue-collapse.open { grid-template-rows: 1fr; }
+.livequeue-collapse > * { overflow: hidden; min-height: 0; }
 .livequeue { display: flex; flex-direction: column; gap: 5px; }
 .livequeue-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; padding: 5px 8px; border-radius: 8px; background: var(--ink-1); }
 .livequeue-row .mono { font-family: var(--mono); color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
@@ -321,6 +328,16 @@ kbd {
 .chart-legend-item { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text-2); }
 .chart-legend-item i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
 .chart-empty { font-size: 12px; color: var(--text-3); padding: 6px 0; }
+
+.battle-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.battle-table th { text-align: left; font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: .02em; color: var(--text-3); padding: 4px 6px; border-bottom: 1px solid var(--line-2); }
+.battle-table td { padding: 6px; border-bottom: 1px solid var(--line); }
+.battle-table tr:last-child td { border-bottom: none; }
+.battle-icon { width: 20px; text-align: center; }
+.battle-target { color: var(--text); }
+.battle-num { font-family: var(--mono); color: var(--text-2); text-align: right; white-space: nowrap; }
+.battle-loss { font-family: var(--mono); color: var(--text-3); text-align: right; white-space: nowrap; }
+.battle-loss.has-loss { color: var(--rose); }
 
 .testband {
   display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
@@ -417,9 +434,13 @@ kbd {
 .tpl-name small { font-weight: 400; color: var(--text-3); font-size: 11px; white-space: nowrap; }
 .tpl-unit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .tpl-unit-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--text-2); }
-.cap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
-.cap-row { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--text-2); }
-.cap-row input { height: 34px; }
+.cap-slider-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 18px; }
+.cap-num-inline {
+  width: 64px; height: 24px; padding: 0 6px; text-align: right; font-family: var(--mono); font-size: 12px;
+  border-radius: 6px; border: 1px solid var(--line-2); background: var(--ink-1); color: var(--text); outline: none;
+}
+.cap-num-inline:focus { border-color: rgba(233, 165, 75, 0.6); }
+.cap-num-inline::placeholder { color: var(--text-3); font-family: var(--sans); font-size: 10.5px; }
 .queue-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
 .queue-row { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--ink-1); }
 .queue-badge { width: 20px; height: 20px; border-radius: 50%; background: var(--ember-soft); color: var(--ember); font-family: var(--mono); font-size: 10.5px; display: grid; place-items: center; flex: none; }
@@ -1050,6 +1071,12 @@ const state = {
   filter: 'all',
   query: '',
   openFine: new Set(),
+  // Seções do cartão "Ao vivo" (Construindo/Recrutando/Coletando/etc.) que
+  // o usuário pode recolher — igual ao "Ajustes finos", mas aqui a caixa
+  // inteira é redesenhada a cada 1s pelo relógio ao vivo, então o estado
+  // não pode morar só numa classe CSS: precisa estar aqui pra sobreviver a
+  // cada re-render. Começa com tudo aberto (mesmo comportamento de antes).
+  liveOpen: new Set(['build', 'train', 'scavenge', 'outgoing', 'incoming', 'battle']),
   log: [],
 };
 
@@ -1362,6 +1389,28 @@ function fmtCountdown(ms) {
   return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
+// Parseia "H:MM:SS" pra ms — usado só como fallback (ver effectiveEtaAtMs
+// abaixo), pra quando o item sincronizado ainda não tem `etaAtMs` (dado de
+// uma versão do script anterior ao v1.8.0, que só existia como texto
+// congelado). Sem esse fallback, um relógio ao vivo com dado antigo no
+// localStorage do navegador ficava parado até um ciclo novo do script
+// trazer o campo novo.
+function parseCountdownToMs(text) {
+  const m = String(text || '').match(/^(\d+):(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  return ((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * 1000;
+}
+
+// Horário-alvo efetivo pra um item de fila: usa `etaAtMs` se já veio pronto
+// da sincronização; senão, deriva de `remaining` (texto "H:MM:SS") somado
+// ao horário em que aquele snapshot foi capturado (`snapAt`) — continua
+// contando ao vivo mesmo com dado sincronizado antes do etaAtMs existir.
+function effectiveEtaAtMs(item, snapAt) {
+  if (item.etaAtMs) return item.etaAtMs;
+  const ms = parseCountdownToMs(item.remaining);
+  return ms != null && snapAt ? snapAt + ms : null;
+}
+
 function worldParts(world) {
   const m = String(world).match(/^([a-z]+?)(s|p|c)?(\d+)$/i);
   if (!m) return { prefix: world.slice(0, 3), num: '' };
@@ -1546,6 +1595,38 @@ function statsHTML(key) {
     <div class="stat"><div class="k">Módulos ativos</div><div class="v">${on}<small> / ${MODULES.length}</small></div><div class="meter"><i style="width:${pct}%"></i></div></div>`;
 }
 
+// Tabela dos relatórios de ataque recentes — antes era uma lista de uma
+// linha por relatório com o total de saque/perdas; pedido do usuário pra
+// uma tabela de verdade, com o saque por recurso em colunas e a perda
+// detalhada por tropa (antes só mostrava "perdi 2", sem dizer qual tropa).
+function battleTableHTML(log) {
+  if (!log || !log.length) return '';
+  const unitsTxt = (units) => units ? Object.entries(units).map(([u, n]) => `${n} ${unitLabel(u)}`).join(', ') : '';
+  const rows = log.slice(0, 10).map((b) => {
+    const resIcon = b.resultIcon === 'green' ? '✅' : b.resultIcon === 'yellow' ? '⚠️' : '❔';
+    const lossText = unitsTxt(b.lostAttUnits) || (b.lostAtt ? String(b.lostAtt) : '');
+    return `<tr>
+      <td class="battle-icon" title="${esc(b.resultLabel || '')}">${resIcon}</td>
+      <td class="battle-target">${esc(b.target || b.title || '?')}</td>
+      <td class="battle-num">${b.loot ? fmt(b.loot.wood || 0) : '—'}</td>
+      <td class="battle-num">${b.loot ? fmt(b.loot.stone || 0) : '—'}</td>
+      <td class="battle-num">${b.loot ? fmt(b.loot.iron || 0) : '—'}</td>
+      <td class="battle-loss${lossText ? ' has-loss' : ''}">${lossText ? esc(lossText) : '—'}</td>
+    </tr>`;
+  }).join('');
+  const open = state.liveOpen.has('battle');
+  return `
+    <button class="livesub livesub-toggle" data-live-toggle="battle" type="button">
+      ${icon('basket', 'sm')}<span>Relatórios de ataque</span>${icon('chev', `sm live-chev${open ? ' open' : ''}`)}
+    </button>
+    <div class="livequeue-collapse${open ? ' open' : ''}">
+      <table class="battle-table">
+        <thead><tr><th></th><th>Alvo</th><th>🪵</th><th>🧱</th><th>⛏</th><th>Minhas perdas</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
 function liveHTML(key) {
   const s = state.accounts[key];
   const hasAnything = s && (s.resources || s.buildQueue || s.trainQueue || s.battleLog);
@@ -1576,37 +1657,60 @@ function liveHTML(key) {
   }
 
   const now = Date.now();
-  const queueBlock = (title, iconName, items, render) => items ? `
-      <div class="livesub">${icon(iconName, 'sm')}${title}</div>
-      <div class="livequeue">${items.length ? items.map(render).join('') : '<span class="note">nada agora</span>'}</div>` : '';
+  // Cada seção pode ser recolhida (pedido do usuário, igual ao "Ajustes
+  // finos") — o estado mora em state.liveOpen porque a caixa inteira é
+  // redesenhada a cada 1s pelo relógio ao vivo, então uma classe CSS
+  // sozinha se perderia a cada tick.
+  const queueBlock = (id, title, iconName, items, render) => {
+    if (!items) return '';
+    const open = state.liveOpen.has(id);
+    const body = items.length ? items.map(render).join('') : '<span class="note">nada agora</span>';
+    return `
+      <button class="livesub livesub-toggle" data-live-toggle="${id}" type="button">
+        ${icon(iconName, 'sm')}<span>${esc(title)}</span>${icon('chev', `sm live-chev${open ? ' open' : ''}`)}
+      </button>
+      <div class="livequeue-collapse${open ? ' open' : ''}"><div class="livequeue">${body}</div></div>`;
+  };
 
-  const buildHTML = queueBlock('Construindo', 'hammer', s.buildQueue,
-    (q) => `<div class="livequeue-row"><span>${esc(q.name)}${q.level ? ` nv.${q.level}` : ''}</span><span class="mono">${esc(q.etaAtMs ? fmtCountdown(q.etaAtMs - now) : (q.remaining || q.etaText || ''))}</span></div>`);
-  const trainHTML = queueBlock('Recrutando', 'swords', s.trainQueue,
-    (t) => `<div class="livequeue-row"><span>${esc(t.building)}: ${esc(t.name)}</span><span class="mono">${esc(t.etaAtMs ? fmtCountdown(t.etaAtMs - now) : (t.remaining || ''))}</span></div>`);
-  const outgoingHTML = queueBlock('Comandos enviados', 'swords', s.outgoing,
+  const buildHTML = queueBlock('build', 'Construindo', 'hammer', s.buildQueue,
+    (q) => {
+      const eta = effectiveEtaAtMs(q, s.buildQueueAt);
+      return `<div class="livequeue-row"><span>${esc(q.name)}${q.level ? ` nv.${q.level}` : ''}</span><span class="mono">${esc(eta ? fmtCountdown(eta - now) : (q.remaining || q.etaText || ''))}</span></div>`;
+    });
+  const trainHTML = queueBlock('train', 'Recrutando', 'swords', s.trainQueue,
+    (t) => {
+      const eta = effectiveEtaAtMs(t, s.trainQueueAt);
+      return `<div class="livequeue-row"><span>${esc(t.building)}: ${esc(t.name)}</span><span class="mono">${esc(eta ? fmtCountdown(eta - now) : (t.remaining || ''))}</span></div>`;
+    });
+  // O widget do jogo lista "Retorno de <aldeia>" (suas próprias tropas
+  // voltando) dentro do mesmo #commands_outgoings de onde tiramos
+  // s.outgoing — mas pro usuário isso é claramente algo "chegando" (em
+  // casa), não algo "enviado". Separa pelo texto do rótulo (é a única pista
+  // que a tela dá; não existe um campo dedicado pra isso).
+  const isReturning = (c) => /^Retorno\b/i.test(c.label || '');
+  const stillOutbound = (s.outgoing || []).filter((c) => !isReturning(c));
+  const returning = (s.outgoing || []).filter((c) => isReturning(c) && c.arrivesAtMs > now);
+  const arrivingSoon = [
+    ...(s.incoming || []).filter((c) => c.arrivesAtMs > now).map((c) => ({ ...c, isEnemy: true })),
+    ...returning.map((c) => ({ ...c, isEnemy: false })),
+  ].sort((a, b) => a.arrivesAtMs - b.arrivesAtMs);
+
+  const outgoingHTML = queueBlock('outgoing', 'Comandos enviados', 'swords', stillOutbound,
     (c) => {
       const arrived = c.arrivesAtMs <= now;
       const returnTxt = !c.returnAtMs ? '' : c.returnAtMs <= now ? ' · de volta' : ` · volta ~${fmtCountdown(c.returnAtMs - now)}`;
       return `<div class="livequeue-row"><span>${c.kind === 'attack' ? '⚔' : '🛡'} ${esc(c.label || '?')}</span><span class="mono">${esc(arrived ? 'chegou' : fmtCountdown(c.arrivesAtMs - now))}${esc(returnTxt)}</span></div>`;
     });
-  const incomingHTML = queueBlock('Chegando', 'shield', (s.incoming || []).filter((c) => c.arrivesAtMs > now),
-    (c) => `<div class="livequeue-row"><span>⚠ ${esc(c.label || 'comando')}</span><span class="mono">${esc(fmtCountdown(c.arrivesAtMs - now))}</span></div>`);
-  const scavengeHTML = queueBlock('Coletando', 'basket', (s.scavenge || []).filter((o) => !o.locked),
+  const incomingHTML = queueBlock('incoming', 'Chegando', 'shield', arrivingSoon,
+    (c) => `<div class="livequeue-row"><span>${c.isEnemy ? '⚠' : '↩'} ${esc(c.label || (c.isEnemy ? 'comando' : 'retorno'))}</span><span class="mono">${esc(fmtCountdown(c.arrivesAtMs - now))}</span></div>`);
+  const scavengeHTML = queueBlock('scavenge', 'Coletando', 'basket', (s.scavenge || []).filter((o) => !o.locked),
     (o) => {
       if (!o.busy) return `<div class="livequeue-row"><span>Opção ${o.id}</span><span class="mono">livre</span></div>`;
       const returned = o.returnAtMs != null && o.returnAtMs <= now;
       const unitsTxt = o.units ? Object.entries(o.units).filter(([, n]) => n > 0).map(([u, n]) => `${n} ${unitLabel(u)}`).join(', ') : '';
       return `<div class="livequeue-row"><span>Opção ${o.id}${unitsTxt ? ` · ${esc(unitsTxt)}` : ''}</span><span class="mono">${esc(returned ? 'de volta' : fmtCountdown(o.returnAtMs - now))}</span></div>`;
     });
-  const battleHTML = queueBlock('Relatórios de ataque', 'basket', s.battleLog,
-    (b) => {
-      const resIcon = b.resultIcon === 'green' ? '✅' : b.resultIcon === 'yellow' ? '⚠️' : '❔';
-      const lootTxt = b.loot ? `🪵${fmt(b.loot.wood || 0)} 🧱${fmt(b.loot.stone || 0)} ⛏${fmt(b.loot.iron || 0)}` : '';
-      const lossTxt = b.lostAtt ? `perdi ${fmt(b.lostAtt)}` : '';
-      const detail = [lootTxt, lossTxt].filter(Boolean).join(' · ');
-      return `<div class="livequeue-row"><span>${resIcon} ${esc(b.target || b.title || '?')}</span><span class="mono">${esc(detail)}</span></div>`;
-    });
+  const battleHTML = battleTableHTML(s.battleLog);
 
   return `
     <div class="livecard">
@@ -1743,13 +1847,20 @@ function tileHTML(m, cfg) {
   const resetBtn = m.resetTargets
     ? `<button class="btn-ghost btn-sm" data-act="reset-targets" style="margin-left:auto" type="button" title="Pede pra aba do jogo limpar o cooldown de alvos desta conta">${icon('bolt', 'sm')}Restaurar alvos</button>`
     : '';
-  const fine = (m.fields.length || m.note || resetBtn) ? `
+  // unitCaps/recruitGoals (grades de quantidade por tropa) ficam dentro de
+  // "Ajustes finos" — pedido do usuário: antes ficavam sempre visíveis,
+  // ocupando espaço mesmo pra quem não mexe nelas o tempo todo. O editor de
+  // fila da Construção (queueEditor) continua fora, visível direto — é o
+  // plano de construção em si, não um "ajuste fino" que se configura uma
+  // vez e esquece.
+  const capsOrGoals = (m.unitCaps ? unitCapsHTML(m, cfg) : '') + (m.recruitGoals ? recruitGoalsHTML(m, cfg) : '');
+  const fine = (m.fields.length || m.note || resetBtn || capsOrGoals) ? `
     <div class="fine-wrap ${open ? 'open' : ''}">
       <div style="display:flex;align-items:center;gap:8px">
         <button class="fine-toggle" data-fine="${m.id}" type="button">${icon('chev', 'sm')}Ajustes finos</button>
         ${resetBtn}
       </div>
-      <div class="fine-body">${fields}${m.note ? `<p class="note">${esc(m.note)}</p>` : ''}</div>
+      <div class="fine-body">${capsOrGoals}${fields}${m.note ? `<p class="note">${esc(m.note)}</p>` : ''}</div>
     </div>` : '';
   return `
     <article class="tile ${cfg.enabled ? 'on' : ''}" data-mod="${m.id}">
@@ -1764,31 +1875,46 @@ function tileHTML(m, cfg) {
         ${icon('chev', 'sm')}
       </button>
       ${m.templates ? templatesHTML(m, cfg) : ''}
-      ${m.unitCaps ? unitCapsHTML(m, cfg) : ''}
       ${m.queueEditor ? queueEditorHTML(m, cfg) : ''}
-      ${m.recruitGoals ? recruitGoalsHTML(m, cfg) : ''}
       ${fine}
     </article>`;
 }
 
+// Slider + número lado a lado — mesmo componente visual dos outros campos
+// de "Ajustes finos" (ex.: "Reserva de recursos"), só que o valor à direita
+// é editável em vez de só um <output> read-only. Pedido do usuário: um
+// layout "mais premium" que os campos de número soltos de antes, e poder
+// digitar o valor exato além de arrastar.
+const CAP_SLIDER_MAX = 500;
+const CAP_SLIDER_STEP = 5;
+
+function capSliderRow(label, value, placeholder, rangeAttr, numAttr) {
+  const shown = value === undefined || value === null || value === '' ? '' : value;
+  const sliderVal = Math.max(0, Math.min(CAP_SLIDER_MAX, Number(shown) || 0));
+  return `
+    <label class="fine">
+      <span class="fine-top">
+        <span>${esc(label)}</span>
+        <input type="number" min="0" class="cap-num-inline" placeholder="${esc(placeholder)}" value="${shown}" ${numAttr}>
+      </span>
+      <input type="range" min="0" max="${CAP_SLIDER_MAX}" step="${CAP_SLIDER_STEP}" value="${sliderVal}" ${rangeAttr}>
+    </label>`;
+}
+
 function unitCapsHTML(m, cfg) {
   const caps = cfg.settings.unitCaps || {};
-  const rows = SCAVENGE_UNITS.map((u) => `
-    <label class="cap-row">
-      <span>${esc(u.label)}</span>
-      <input type="number" min="0" class="field" placeholder="sem limite" value="${caps[u.value] ?? ''}" data-cap="${m.id}:${u.value}">
-    </label>`).join('');
-  return `<div class="tpl-box"><div class="cap-grid">${rows}</div></div>`;
+  const rows = SCAVENGE_UNITS.map((u) =>
+    capSliderRow(u.label, caps[u.value], 'sem limite', `data-cap-range="${m.id}:${u.value}"`, `data-cap="${m.id}:${u.value}"`)
+  ).join('');
+  return `<div class="tpl-box cap-slider-grid">${rows}</div>`;
 }
 
 function recruitGoalsHTML(m, cfg) {
   const goals = cfg.settings.goals || {};
-  const rows = RECRUIT_UNITS.map((u) => `
-    <label class="cap-row">
-      <span>${esc(u.label)}</span>
-      <input type="number" min="0" class="field" placeholder="0" value="${goals[u.value] ?? ''}" data-goal="${m.id}:${u.value}">
-    </label>`).join('');
-  return `<div class="tpl-box"><div class="cap-grid">${rows}</div></div>`;
+  const rows = RECRUIT_UNITS.map((u) =>
+    capSliderRow(u.label, goals[u.value], '0', `data-goal-range="${m.id}:${u.value}"`, `data-goal="${m.id}:${u.value}"`)
+  ).join('');
+  return `<div class="tpl-box cap-slider-grid">${rows}</div>`;
 }
 
 const BUILDING_LABELS = {
@@ -2198,6 +2324,17 @@ main.addEventListener('click', (e) => {
     return;
   }
 
+  const liveToggle = t.closest('[data-live-toggle]');
+  if (liveToggle) {
+    const id = liveToggle.dataset.liveToggle;
+    state.liveOpen.has(id) ? state.liveOpen.delete(id) : state.liveOpen.add(id);
+    // Redesenha na hora (não espera o próximo tick de 1s do relógio ao
+    // vivo) pra não parecer que o clique não fez nada.
+    const live = $('#liveBox');
+    if (live) live.innerHTML = liveHTML(state.selected);
+    return;
+  }
+
   const sel = t.closest('[data-field-select]');
   if (sel) {
     const [id, fk] = sel.dataset.fieldSelect.split('.');
@@ -2334,6 +2471,8 @@ main.addEventListener('input', (e) => {
     const raw = cap.value.trim();
     if (raw === '') delete cfg.settings.unitCaps[unit];
     else cfg.settings.unitCaps[unit] = Math.max(0, Math.round(Number(raw)) || 0);
+    const slider = cap.closest('.fine').querySelector('[data-cap-range]');
+    if (slider) { slider.value = Math.max(0, Math.min(CAP_SLIDER_MAX, Number(raw) || 0)); paintRange(slider); }
     touch(key);
   }
   const goal = e.target.closest('[data-goal]');
@@ -2344,6 +2483,35 @@ main.addEventListener('input', (e) => {
     const raw = goal.value.trim();
     if (raw === '' || Number(raw) <= 0) delete cfg.settings.goals[unit];
     else cfg.settings.goals[unit] = Math.max(0, Math.round(Number(raw)) || 0);
+    const slider = goal.closest('.fine').querySelector('[data-goal-range]');
+    if (slider) { slider.value = Math.max(0, Math.min(CAP_SLIDER_MAX, Number(raw) || 0)); paintRange(slider); }
+    refreshTile(id);
+    touch(key);
+  }
+  // Arrastar o slider funciona igual a digitar — atualiza o mesmo
+  // settings.unitCaps/goals e sincroniza o campo numérico ao lado.
+  const capRange = e.target.closest('[data-cap-range]');
+  if (capRange) {
+    const [id, unit] = capRange.dataset.capRange.split(':');
+    const cfg = state.profiles[key].modules[id];
+    cfg.settings.unitCaps = cfg.settings.unitCaps || {};
+    const v = Number(capRange.value);
+    cfg.settings.unitCaps[unit] = v;
+    paintRange(capRange);
+    const num = capRange.closest('.fine').querySelector('.cap-num-inline');
+    if (num) num.value = v;
+    touch(key);
+  }
+  const goalRange = e.target.closest('[data-goal-range]');
+  if (goalRange) {
+    const [id, unit] = goalRange.dataset.goalRange.split(':');
+    const cfg = state.profiles[key].modules[id];
+    cfg.settings.goals = cfg.settings.goals || {};
+    const v = Number(goalRange.value);
+    if (v <= 0) delete cfg.settings.goals[unit]; else cfg.settings.goals[unit] = v;
+    paintRange(goalRange);
+    const num = goalRange.closest('.fine').querySelector('.cap-num-inline');
+    if (num) num.value = v;
     refreshTile(id);
     touch(key);
   }
