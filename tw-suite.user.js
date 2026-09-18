@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.10.0
+// @version      1.10.1
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1443,7 +1443,13 @@
 
   async function getScavengeStatus(vid) {
     try {
-      const { text } = await getPage(`/game.php?village=${vid}&screen=place&mode=scavenge`);
+      // `_` cache-busting: essa URL é buscada de novo a cada ciclo do
+      // live-status pedindo exatamente o mesmo endereço — sem isso o
+      // navegador pode devolver uma resposta em cache em vez de ir no
+      // servidor, fazendo o status de coleta parecer "travado" mesmo com
+      // uma coleta de verdade em andamento (relatado pelo usuário depois
+      // de usar em conta real).
+      const { text } = await getPage(`/game.php?village=${vid}&screen=place&mode=scavenge&_=${Date.now()}`);
       const data = parseScavengeVillageData(text);
       if (!data || !data.options) return null;
       return Object.entries(data.options).map(([id, o]) => {

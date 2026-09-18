@@ -228,6 +228,16 @@ Feedback do usuário depois de usar o v1.9.0 com a conta real de verdade (primei
 | Construção ainda mostrando nível já ultrapassado | Provavelmente dado sincronizado antes do v1.8.0 (só se resolve com um ciclo novo do script) — não achei bug adicional no código; a lógica de filtro (Fase 11) continua a mesma, só validada de novo | Nenhuma mudança de código — pedido pro usuário confirmar de novo depois de um tempo com o v1.10.0 rodando |
 | Grade de quantidade do Recrutamento/Coleta/Coleta em Massa sempre visível, layout "não premium" | — | Movida pra dentro de "Ajustes finos" (só aparece expandido). Cada linha virou um slider + campo numérico editável lado a lado, mesmo componente visual dos outros campos de ajuste fino (ex.: "Reserva de recursos") — dá pra arrastar OU digitar o valor exato, sincronizados nos dois sentidos. **Testado no navegador**: arrastar atualiza o número, digitar atualiza o slider |
 
+## Fase 14 — v1.10.1: bug do colapso, cache da Coleta, gráfico com semana fixa
+
+Feedback imediato depois do v1.10.0, com prints do bug ao vivo:
+
+- **Sobreposição visual ao recolher uma seção**: a animação CSS (`grid-template-rows` 0fr↔1fr) brigava com o relógio ao vivo redesenhando o `#liveBox` inteiro a cada 1s — o resultado visual era texto de seções diferentes se misturando na tela (relatado com print). Trocado por algo à prova de bug: seção recolhida simplesmente não renderiza o corpo (sem CSS de transição nenhuma). Como o box já é redesenhado a cada segundo mesmo, uma animação nunca teria tempo de terminar direito de qualquer forma.
+- **Coleta não atualizava** mesmo com uma coleta de verdade rodando no jogo (confirmado por print do jogo mostrando "Pequena Coleta" ativa, 0:22:33 restando, enquanto o dashboard e o painel mostravam "nada agora"). Causa mais provável: `getScavengeStatus` busca a mesma URL (`screen=place&mode=scavenge`) repetidamente a cada ciclo, e sem cache-busting o navegador pode devolver uma resposta em cache do primeiro fetch em vez de ir no servidor de novo. Adicionado `&_=${Date.now()}` na URL pra forçar busca sempre fresca. **UNVERIFIED se essa era mesmo a causa raiz** — é a explicação mais plausível e o fix é seguro/barato de qualquer forma, mas só um teste ao vivo confirma.
+- **Gráfico de histórico "não parece dashboard"**: com só 1 dia de dado real, uma única barra esticava 100% da largura do gráfico, sem parecer um gráfico de verdade. Agora sempre mostra os últimos 7 dias fixos (hoje e os 6 anteriores), preenchendo com barras vazias os dias sem relatório — dá contexto visual de "semana" desde o primeiro dia de uso, em vez de esperar acumular histórico pra parecer um gráfico.
+
+**Testado no navegador** com dado simulado: recolher/expandir sem nenhuma sobreposição, gráfico mostrando a janela de 7 dias corretamente com só o último preenchido.
+
 ## Fases futuras (ainda não implementadas)
 
 - Auto Defesa: ainda no formato antigo (detecta "ataque" como texto solto na página — falso-positivo praticamente garantido). Candidato a reescrever com o mesmo parser de `info_command` do live-status, uma vez confirmado.
