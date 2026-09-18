@@ -58,3 +58,4 @@ Clique no botão/aba "TW Suite" pra abrir o painel. Nele aparecem:
 
 - O script roda inteiramente no seu navegador, na sua sessão já logada — não pede senha, não acessa sua conta de forma independente.
 - Nenhum segredo (webhook do Discord etc., quando existir) fica no repositório — cada pessoa cola o próprio nas configurações, guardado só localmente.
+- **Exceção deliberada**: a ferramenta opcional e separada `multi-contas/` (ver [`multi-contas/docs/MULTI-CONTAS.md`](multi-contas/docs/MULTI-CONTAS.md)) guarda senha de jogo localmente, criptografada, só pra quem optar por instalá-la — essa promessa acima vale pro TW Suite principal (`tw-suite.user.js` + `dashboard.html`), não pra ela.

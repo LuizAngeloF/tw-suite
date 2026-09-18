@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.5.0
+// @version      1.6.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1330,13 +1330,96 @@
     }
   }
 
+  // Comandos que EU enviei e ainda estão viajando (ataque/apoio) — mesma
+  // tela do getIncomingAttacks, só com type=outgoings. Sem isso não dava
+  // pra ver na tela nem no dashboard que o Auto Farm realmente mandou algo,
+  // só o efeito colateral (alvo sumindo da lista). UNVERIFIED, mesmo
+  // aviso do getIncomingAttacks: nome/formato da tela nunca confirmados.
+  async function getOutgoingCommands(vid) {
+    try {
+      const { doc } = await getPage(`/game.php?village=${vid}&screen=info_command&type=outgoings&mode=outgoings`);
+      const rows = [...doc.querySelectorAll('#commands_outgoings tr, table.command-table tr')]
+        .filter((tr) => tr.querySelector('.relative_time, [data-duration]'));
+      const out = [];
+      for (const tr of rows) {
+        const durEl = tr.querySelector('.relative_time[data-duration], [data-duration]');
+        const destEl = tr.querySelector('a[href*="info_village"]');
+        const isAttack = /att|nuke|spear|sword|axe/i.test(tr.className) || !!tr.querySelector('img[src*="att"]');
+        if (!durEl) continue;
+        out.push({
+          etaMs: Number(durEl.getAttribute('data-duration')) * 1000,
+          destination: destEl ? destEl.textContent.trim() : null,
+          kind: isAttack ? 'attack' : 'other',
+        });
+      }
+      out.sort((a, b) => a.etaMs - b.etaMs);
+      return out;
+    } catch (e) {
+      if (e instanceof BotCheckError) throw e;
+      return null;
+    }
+  }
+
+  // Fila de construção exibida na tela (nome, nível-alvo, tempo restante).
+  // UNVERIFIED: extrai por texto, não por seletor fixo, mas o formato real
+  // da tabela nunca foi confirmado ao vivo.
+  function readBuildQueue(doc) {
+    const rows = [];
+    for (const tr of doc.querySelectorAll('#build_queue tr[class*="buildorder_"]')) {
+      const cells = [...tr.querySelectorAll('td')].map((td) => td.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
+      if (!cells.length) continue;
+      const first = cells[0];
+      const levelMatch = first.match(/N[íi]vel\s*(\d+)/i);
+      const name = first.replace(/N[íi]vel\s*\d+/i, '').trim() || first;
+      const remaining = cells.find((c) => /^\d{1,2}:\d{2}:\d{2}$/.test(c)) || null;
+      const etaText = cells.find((c) => /\bàs\b/i.test(c)) || null;
+      rows.push({ name, level: levelMatch ? Number(levelMatch[1]) : null, remaining, etaText });
+    }
+    return rows;
+  }
+
+  // Fila de recrutamento — mesma ideia do readBuildQueue, mas nas telas de
+  // treino (quartel/estábulo/oficina). UNVERIFIED: supõe uma tabela
+  // #trainqueue com o mesmo estilo de linha (nome + tempo restante); nunca
+  // confirmado ao vivo. Busca as 3 telas em paralelo; qualquer uma que
+  // falhar (ex.: edifício não construído) simplesmente não contribui linhas.
+  async function readTrainQueueForBuilding(vid, building, label) {
+    try {
+      const { doc } = await getPage(`/game.php?village=${vid}&screen=${building}`);
+      const rows = [];
+      for (const tr of doc.querySelectorAll('#trainqueue tr, .trainqueue tr')) {
+        const cells = [...tr.querySelectorAll('td')].map((td) => td.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
+        if (!cells.length) continue;
+        const remaining = cells.find((c) => /^\d{1,2}:\d{2}:\d{2}$/.test(c));
+        if (!remaining) continue; // linha de cabeçalho ou sem countdown — ignora
+        const countMatch = cells[0].match(/(\d+)\s*x/i);
+        rows.push({ building: label, name: cells[0], count: countMatch ? Number(countMatch[1]) : null, remaining });
+      }
+      return rows;
+    } catch {
+      return [];
+    }
+  }
+
+  async function getTrainQueue(vid) {
+    const [barracks, stable, garage] = await Promise.all([
+      readTrainQueueForBuilding(vid, 'barracks', 'Quartel'),
+      readTrainQueueForBuilding(vid, 'stable', 'Estábulo'),
+      readTrainQueueForBuilding(vid, 'garage', 'Oficina'),
+    ]);
+    return [...barracks, ...stable, ...garage];
+  }
+
   async function buildLiveSnapshot() {
     const g = gd();
     if (!g || !g.village) return null;
     const vid = g.village.id;
-    const [troops, incoming] = await Promise.all([
+    const [troops, incoming, outgoing, buildQueue, trainQueue] = await Promise.all([
       troopsHome(vid).catch(() => null),
       getIncomingAttacks(vid).catch(() => null),
+      getOutgoingCommands(vid).catch(() => null),
+      getPage(`/game.php?village=${vid}&screen=main`).then((p) => readBuildQueue(p.doc)).catch(() => null),
+      getTrainQueue(vid).catch(() => null),
     ]);
     return {
       at: Date.now(),
@@ -1347,6 +1430,12 @@
       troops,
       incoming: incoming ? incoming.slice(0, 5) : null,
       incomingAttacks: incoming ? incoming.filter((c) => c.kind === 'attack').length : null,
+      outgoing: outgoing ? outgoing.slice(0, 5) : null,
+      outgoingAttacks: outgoing ? outgoing.filter((c) => c.kind === 'attack').length : null,
+      buildQueue,
+      buildQueueAt: buildQueue ? Date.now() : undefined,
+      trainQueue,
+      trainQueueAt: trainQueue ? Date.now() : undefined,
     };
   }
 
@@ -1356,7 +1445,8 @@
     getPage, postForm, ajax, errorFromHtml, guard, pageHasBotCheck, flagBotCheck, botState,
     prepareCommand, confirmCommand, sendCommand, availableUnits, listCancelableCommands, cancelLinks, cancelCommand,
     sendResources, premiumExchange, premiumExchangeRates, getVillageIndex, myVillages, parseGameTime, formatServerTime, serverWallOffsetMs, worldConfig,
-    notify, acquireLock, loop, h, card, parseUnitList, getIncomingAttacks, troopsHome, buildLiveSnapshot,
+    notify, acquireLock, loop, h, card, parseUnitList, getIncomingAttacks, getOutgoingCommands, troopsHome,
+    readBuildQueue, getTrainQueue, buildLiveSnapshot,
   };
 })();
 
@@ -1374,21 +1464,63 @@
   const TW = window.TWSuite;
   const S = TW.shared;
 
+  function renderList(host, items, emptyText) {
+    host.innerHTML = '';
+    if (!items || !items.length) {
+      host.appendChild(S.h('div', { class: 'tws-muted', text: emptyText }));
+      return;
+    }
+    for (const line of items) host.appendChild(S.h('div', { class: 'tws-row', text: line }));
+  }
+
   TW.registerModule({
     id: 'live-status',
     name: 'Status ao Vivo (interno)',
     screens: ['any'],
     defaultEnabled: true,
     async run(ctx) {
+      // Antes só aparecia visível de algum jeito no dashboard, e mesmo lá
+      // dependia de outro módulo estar ligado pra reportar. Agora tem um
+      // cartão próprio, sempre visível dentro do jogo também.
+      const ui = S.card('live-status', 'Status ao Vivo');
+      const resHost = S.h('div');
+      const buildHost = S.h('div', { class: 'tws-list' });
+      const trainHost = S.h('div', { class: 'tws-list' });
+      const cmdHost = S.h('div', { class: 'tws-list' });
+      ui.body.append(
+        resHost,
+        S.h('div', { style: { fontWeight: 'bold', fontSize: '10px', marginTop: '4px' }, text: 'Construindo' }), buildHost,
+        S.h('div', { style: { fontWeight: 'bold', fontSize: '10px', marginTop: '4px' }, text: 'Recrutando' }), trainHost,
+        S.h('div', { style: { fontWeight: 'bold', fontSize: '10px', marginTop: '4px' }, text: 'Comandos' }), cmdHost,
+      );
+
+      // Antes só mostrava fila de construção/recrutamento quando o módulo
+      // de automação correspondente estava ligado (era ele quem lia e
+      // reportava). Status ao Vivo roda sempre — agora é a única fonte
+      // dessas leituras, pra aparecer mesmo com tudo desligado. Intervalo
+      // encurtado (era 60-95s) porque o usuário reportou demora grande
+      // pra atualizar.
       S.loop('live-status', async () => {
         const snap = await S.buildLiveSnapshot();
         if (!snap) return;
+
+        resHost.textContent = snap.resources
+          ? `${S.RES_LABELS.wood} ${snap.resources.wood} · ${S.RES_LABELS.stone} ${snap.resources.stone} · ${S.RES_LABELS.iron} ${snap.resources.iron} (máx ${snap.resources.storageMax})`
+          : '';
+        renderList(buildHost, (snap.buildQueue || []).map((q) => `${q.name}${q.level ? ` nv.${q.level}` : ''}${q.remaining ? ` · ${q.remaining}` : ''}`), 'Nada na fila agora.');
+        renderList(trainHost, (snap.trainQueue || []).map((t) => `${t.building}: ${t.name}${t.remaining ? ` · ${t.remaining}` : ''}`), 'Nada treinando agora.');
+        const cmdLines = [];
+        if (snap.outgoingAttacks) cmdLines.push(`⚔ ${snap.outgoingAttacks} ataque(s) a caminho (enviados)`);
+        if (snap.incomingAttacks) cmdLines.push(`⚠ ${snap.incomingAttacks} ataque(s) chegando`);
+        renderList(cmdHost, cmdLines, 'Nenhum comando ativo.');
+        ui.setStatus(`atualizado ${new Date().toLocaleTimeString()}`);
+
         const key = TW.accountKeyFromGame && TW.accountKeyFromGame();
         if (!key) return;
         const accounts = (await ctx.storage.get('accounts', {})) || {};
         accounts[key] = { ...(accounts[key] || {}), ...snap, lastSeen: Date.now() };
         await ctx.storage.set('accounts', accounts);
-      }, 60000, 95000);
+      }, 35000, 55000);
     },
   });
 })();
@@ -1729,7 +1861,12 @@
   TW.registerModule({
     id: MODULE_ID,
     name: 'Auto Farm (sem premium)',
-    screens: ['place'],
+    // Antes só rodava com `screens: ['place']` — exigia deixar a aba
+    // parada na Praça de Reunião, senão o módulo nem chegava a iniciar
+    // o loop. O envio em si já buscava a Praça via fetch() quando
+    // necessário (getPlaceDoc tem fallback), então essa restrição era
+    // desnecessária — roda em qualquer tela agora.
+    screens: ['any'],
     defaultEnabled: false,
 
     async run(ctx) {
@@ -2147,13 +2284,23 @@
 })();
 
 // ============================================================
-// MÓDULO: auto-recruit — Recrutamento automático sem estourar recursos
+// MÓDULO: auto-recruit — Recrutamento por metas (reescrito v1.6.0)
+//
+// Antes: uma unidade só, "recruta N por ciclo, pra sempre" — nunca parava
+// sozinho. Pedido do usuário: metas por tropa ("10 lanceiros, 20 bárbaros,
+// 10 espadachins NO TOTAL") — recruta conforme o recurso permite e PARA
+// quando cada meta é atingida, sem ficar em loop pedindo mais.
+//
+// `progress[unidade]` guarda quanto já foi recrutado por ESTA campanha
+// (incrementado a cada ordem aceita pelo jogo — não compara com a
+// quantidade de tropas em casa, que pode cair por perdas em batalha ou
+// subir por outros meios; contar só o que este módulo pediu evita
+// confundir "meta" com "tropas totais"). Aumentar a meta depois retoma
+// de onde parou; "Resetar progresso" (painel do jogo) zera pra uma
+// campanha nova com os mesmos números.
 //
 // Envia via ajaxaction=train no edifício certo (quartel/estábulo/oficina),
-// mantendo uma reserva % do armazém para as outras filas. Relê a
-// configuração a cada ciclo (não só uma vez no carregamento) — assim
-// uma mudança feita no dashboard chega no próximo ciclo, sem precisar
-// recarregar a página.
+// mantendo uma reserva % do armazém pras outras filas.
 // UNVERIFIED: ids #<unidade>_0_cost_<recurso> / #<unidade>_0_a no HTML.
 // ============================================================
 (function registerAutoRecruit() {
@@ -2161,12 +2308,13 @@
   const TW = window.TWSuite;
   const S = TW.shared;
   const MODULE_ID = 'auto-recruit';
-  const DEFAULTS = { unit: 'light', amount: 10, interval: 30000, reservePercent: 20, maxQueueOrders: 2, dryRun: true };
+  const DEFAULTS = { goals: {}, reservePercent: 20, maxQueueOrders: 2, dryRun: true };
   const BUILDING = {
     spear: 'barracks', sword: 'barracks', axe: 'barracks', archer: 'barracks',
     spy: 'stable', light: 'stable', marcher: 'stable', heavy: 'stable',
     ram: 'garage', catapult: 'garage',
   };
+  const progressKey = (vid) => `auto-recruit:progress:${vid}`;
 
   function readCosts(doc, unit) {
     const out = {};
@@ -2189,45 +2337,82 @@
     screens: ['any'],
     defaultEnabled: false,
     async run(ctx) {
+      const vid = S.villageId();
       const ui = S.card(MODULE_ID, 'Recrutamento');
+      const goalsHost = S.h('div', { class: 'tws-list' });
+      const resetBtn = S.h('button', {
+        text: 'Resetar progresso', style: { width: '100%', fontSize: '11px', marginTop: '4px' },
+        title: 'Zera o quanto já foi recrutado nesta campanha — os mesmos números voltam a valer do zero',
+        onclick: async () => {
+          await ctx.storage.set(progressKey(vid), {});
+          ctx.log.info('Progresso de recrutamento resetado.');
+          ui.setStatus('progresso resetado');
+          renderGoals(await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS), {});
+        },
+      });
+      ui.body.append(goalsHost, resetBtn);
 
-      S.loop(`${MODULE_ID}:${S.villageId()}`, async () => {
+      function renderGoals(s, progress) {
+        goalsHost.innerHTML = '';
+        const entries = Object.entries(s.goals || {}).filter(([, g]) => g > 0);
+        if (!entries.length) {
+          goalsHost.appendChild(S.h('div', { class: 'tws-muted', text: 'Sem metas configuradas.' }));
+          return;
+        }
+        for (const [u, g] of entries) {
+          const p = Math.min(g, progress[u] || 0);
+          const done = p >= g;
+          goalsHost.appendChild(S.h('div', { class: 'tws-row', text: `${done ? '✅' : '⏳'} ${S.UNIT_LABELS[u] || u}: ${p}/${g}` }));
+        }
+      }
+
+      S.loop(`${MODULE_ID}:${vid}`, async () => {
         const s = await ctx.storage.getModuleSettings(MODULE_ID, DEFAULTS);
-        const building = BUILDING[s.unit];
-        if (!building) return ui.setStatus('unidade inválida na configuração');
+        const progress = (await ctx.storage.get(progressKey(vid), {})) || {};
+        renderGoals(s, progress);
 
-        const vid = S.villageId();
-        const page = await S.getPage(`/game.php?village=${vid}&screen=${building}`);
-        const g = S.gameDataFromHtml(page.text) || S.gd();
-        const orders = (page.text.match(/TrainOverview\.cancelOrder\(\d+\)/g) || []).length;
-        if (orders >= s.maxQueueOrders) return ui.setStatus(`fila cheia (${orders}) · ${s.amount}× ${S.UNIT_LABELS[s.unit]}`);
+        const pending = Object.entries(s.goals || {}).filter(([u, g]) => g > 0 && (progress[u] || 0) < g && BUILDING[u]);
+        if (!pending.length) return ui.setStatus('meta concluída — nada pendente');
 
-        const costs = readCosts(page.doc, s.unit);
-        const maxAff = readMaxAffordable(page.doc, s.unit);
-        if (maxAff === null && costs.wood === null) return ui.setStatus(`${S.UNIT_LABELS[s.unit]} indisponível nesta aldeia`);
+        const byBuilding = {};
+        for (const [u] of pending) (byBuilding[BUILDING[u]] = byBuilding[BUILDING[u]] || []).push(u);
 
-        const v = g.village;
-        const reserve = Math.floor((Number(v.storage_max) || 0) * (s.reservePercent / 100));
-        let n = Number(s.amount) || 0;
-        if (costs.wood) {
-          for (const r of S.RESOURCES) {
-            if (costs[r]) n = Math.min(n, Math.floor((Number(v[r]) - reserve) / costs[r]));
+        const parts = [];
+        for (const [building, units] of Object.entries(byBuilding)) {
+          const page = await S.getPage(`/game.php?village=${vid}&screen=${building}`);
+          const g2 = S.gameDataFromHtml(page.text) || S.gd();
+          const orders = (page.text.match(/TrainOverview\.cancelOrder\(\d+\)/g) || []).length;
+          if (orders >= s.maxQueueOrders) { parts.push(`${building}: fila cheia`); continue; }
+
+          for (const u of units) {
+            const remaining = s.goals[u] - (progress[u] || 0);
+            const costs = readCosts(page.doc, u);
+            const maxAff = readMaxAffordable(page.doc, u);
+            if (maxAff === null && costs.wood === null) continue; // não recrutável aqui — tenta a próxima tropa desta aldeia
+
+            const v = g2.village;
+            const reserve = Math.floor((Number(v.storage_max) || 0) * (s.reservePercent / 100));
+            let n = remaining;
+            if (costs.wood) for (const r of S.RESOURCES) { if (costs[r]) n = Math.min(n, Math.floor((Number(v[r]) - reserve) / costs[r])); }
+            if (maxAff !== null) n = Math.min(n, maxAff);
+            if (n <= 0) continue;
+
+            if (s.dryRun) {
+              ctx.log.info(`(teste) recrutaria ${n} ${S.UNIT_LABELS[u]} (meta ${remaining} restante)`);
+              parts.push(`teste: +${n} ${S.UNIT_LABELS[u]}`);
+              break;
+            }
+            const res = await S.ajax(building, 'train', { units: { [u]: n } }, { mode: 'train' }, vid);
+            if (!res.ok) { parts.push(`${S.UNIT_LABELS[u]}: ${res.reason}`); break; }
+            progress[u] = (progress[u] || 0) + n;
+            await ctx.storage.set(progressKey(vid), progress);
+            ctx.log.info(`Recrutado ${n} ${S.UNIT_LABELS[u]} (${progress[u]}/${s.goals[u]}).`);
+            parts.push(`+${n} ${S.UNIT_LABELS[u]} (${progress[u]}/${s.goals[u]})`);
+            break; // 1 ordem por edifício por ciclo, junto com o teto de fila
           }
         }
-        if (maxAff !== null) n = Math.min(n, maxAff);
-        if (n <= 0) return ui.setStatus(`aguardando recursos (reserva ${s.reservePercent}%)`);
-
-        if (s.dryRun) {
-          ctx.log.info(`(teste) recrutaria ${n} ${S.UNIT_LABELS[s.unit]} em ${building}`);
-          return ui.setStatus(`teste: recrutaria ${n} ${S.UNIT_LABELS[s.unit]}`);
-        }
-        const res = await S.ajax(building, 'train', { units: { [s.unit]: n } }, { mode: 'train' }, vid);
-        if (!res.ok) {
-          ctx.log.warn('Recrutamento recusado:', res.reason);
-          return ui.setStatus(`recusado: ${res.reason}`);
-        }
-        ctx.log.info(`Recrutado: ${n} ${S.UNIT_LABELS[s.unit]}`);
-        ui.setStatus(`+${n} ${S.UNIT_LABELS[s.unit]} às ${new Date().toLocaleTimeString()}`);
+        renderGoals(s, progress);
+        ui.setStatus(parts.join(' · ') || `aguardando recursos (reserva ${s.reservePercent}%)`);
       }, 25000, 35000);
     },
   });
@@ -2283,11 +2468,19 @@
     if (!idle.length) return { sent: 0, reason: 'todas as coletas em andamento' };
     if (settings.waitAllIdle !== false && idle.length < unlocked.length) return { sent: 0, reason: 'aguardando todas as coletas voltarem' };
 
-    const exclude = new Set(S.parseUnitList(settings.excludeUnits));
+    // unitCaps: teto opcional por tropa — "nunca usar mais que N pra
+    // coleta, o resto fica em casa". null/undefined/'' = sem teto (usa
+    // tudo que tiver disponível, comportamento de antes). 0 = nunca usa
+    // essa tropa (equivalente ao antigo excludeUnits).
+    const caps = settings.unitCaps || {};
     const home = await unitsHome(vid, data);
     const pool = {};
-    for (const u of Object.keys(CARRY)) pool[u] = exclude.has(u) ? 0 : Number(home[u] || 0);
-    if (!Object.values(pool).some((n) => n > 0)) return { sent: 0, reason: 'sem tropas em casa' };
+    for (const u of Object.keys(CARRY)) {
+      const avail = Number(home[u] || 0);
+      const cap = caps[u];
+      pool[u] = (cap === null || cap === undefined || cap === '') ? avail : Math.max(0, Math.min(avail, Number(cap) || 0));
+    }
+    if (!Object.values(pool).some((n) => n > 0)) return { sent: 0, reason: 'sem tropas disponíveis (verifique os tetos configurados)' };
 
     const totalWeight = idle.reduce((acc, o) => acc + WEIGHTS[o.id], 0);
     const payload = {};
@@ -2335,7 +2528,9 @@
   const TW = window.TWSuite;
   const S = TW.shared;
   const MODULE_ID = 'auto-collect';
-  const DEFAULTS = { interval: 60000, excludeUnits: 'knight', waitAllIdle: true, dryRun: true };
+  // Paladino (knight), aríete, catapulta e nobre nunca entram na coleta —
+  // não fazem parte de CARRY (o jogo não aceita esses tipos em expedições).
+  const DEFAULTS = { interval: 60000, unitCaps: {}, waitAllIdle: true, dryRun: true };
 
   TW.registerModule({
     id: MODULE_ID,
@@ -2529,38 +2724,14 @@
     return { counts, total };
   }
 
-  // Lê a fila REAL exibida na tela (nome, nível-alvo, tempo restante,
-  // hora de conclusão) pra mostrar no painel e no dashboard — sem isso,
-  // o módulo constrói mas fica "mudo": dá pra ver que uma construção
-  // entrou na fila, mas não o que está sendo construído nem quando
-  // termina. UNVERIFIED: extrai por texto (não por seletor fixo) pra
-  // ser resiliente a variações de markup, mas nunca confirmado ao vivo.
-  function readBuildQueue(doc) {
-    const rows = [];
-    for (const tr of doc.querySelectorAll('#build_queue tr[class*="buildorder_"]')) {
-      const cells = [...tr.querySelectorAll('td')].map((td) => td.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean);
-      if (!cells.length) continue;
-      const first = cells[0];
-      const levelMatch = first.match(/N[íi]vel\s*(\d+)/i);
-      const name = first.replace(/N[íi]vel\s*\d+/i, '').trim() || first;
-      const remaining = cells.find((c) => /^\d{1,2}:\d{2}:\d{2}$/.test(c)) || null;
-      const etaText = cells.find((c) => /\bàs\b/i.test(c)) || null;
-      rows.push({ name, level: levelMatch ? Number(levelMatch[1]) : null, remaining, etaText });
-    }
-    return rows;
-  }
-
-  async function reportQueue(entries) {
-    const key = TW.accountKeyFromGame && TW.accountKeyFromGame();
-    if (!key) return;
-    const accounts = (await TW.storage.get('accounts', {})) || {};
-    accounts[key] = { ...(accounts[key] || {}), buildQueue: entries, buildQueueAt: Date.now() };
-    await TW.storage.set('accounts', accounts);
-  }
-
+  // A leitura/relato da fila pro dashboard agora é feita pelo módulo
+  // "Status ao Vivo" (sempre ativo, ver shared.buildLiveSnapshot) — antes
+  // só aparecia quando este módulo estava ligado, porque era ele quem
+  // lia e reportava. Aqui só usamos S.readBuildQueue pra montar a lista
+  // de feedback imediato deste cartão específico.
   async function buildOnce(vid, vname, s, log) {
     const page = await S.getPage(`/game.php?village=${vid}&screen=main`);
-    const queue = readBuildQueue(page.doc).map((q) => ({ ...q, village: vname }));
+    const queue = S.readBuildQueue(page.doc).map((q) => ({ ...q, village: vname }));
     const buildings = buildingsFrom(page.text);
     if (!buildings) return { status: 'dados do edifício principal não encontrados', queue };
     const { counts, total } = queuedCounts(page.doc);
@@ -2643,7 +2814,6 @@
         }
         ui.setStatus(villages.length > 1 ? `${villages.length} aldeia(s) verificada(s)` : results[0]);
         renderQueueList(queueHost, allQueue, villages.length > 1);
-        await reportQueue(allQueue).catch(() => {});
       }, interval, interval * 1.5);
     },
   });
@@ -2758,7 +2928,7 @@
   const TW = window.TWSuite;
   const S = TW.shared;
   const MODULE_ID = 'mass-collect';
-  const DEFAULTS = { cycleMinutes: 15, maxPerBatch: 25, interval: 2500, excludeUnits: 'knight', waitAllIdle: true, groupFilter: '', dryRun: true };
+  const DEFAULTS = { cycleMinutes: 15, maxPerBatch: 25, interval: 2500, unitCaps: {}, waitAllIdle: true, groupFilter: '', dryRun: true };
 
   TW.registerModule({
     id: MODULE_ID,
@@ -3077,7 +3247,7 @@
   TW.registerModule({
     id: MODULE_ID,
     name: 'Derrubar Muralha',
-    screens: ['place'],
+    screens: ['any'], // envio usa S.sendCommand, que já busca a Praça via fetch() quando preciso
     defaultEnabled: false,
     async run(ctx) {
       const gd = ctx.gameApi.getGameData();

@@ -18,7 +18,7 @@ Prefere continuar abrindo o arquivo direto? Ainda funciona — ative as duas per
 - Cada conta é identificada por **mundo + nick** (ex.: `br144` + `Agostinho`), exatamente como no jogo.
 - Ao carregar o jogo, o script lê o perfil da conta logada e liga/desliga os módulos com as configurações escolhidas.
 - O script também informa ao painel os pontos, as aldeias e o último acesso de cada conta.
-- **Nenhuma senha é pedida nem guardada.** O script roda no seu navegador, já logado. Se você colar uma lista `usuario|senha|mundo`, a senha é descartada.
+- **Nenhuma senha é pedida nem guardada** neste dashboard. O script roda no seu navegador, já logado. Se você colar uma lista `usuario|senha|mundo`, a senha é descartada. (Existe uma ferramenta separada e opcional, `multi-contas/`, que quebra essa regra de propósito pra permitir login em lote — ver [`multi-contas/docs/MULTI-CONTAS.md`](multi-contas/docs/MULTI-CONTAS.md). Ela não faz parte deste dashboard.)
 
 ## Recursos
 
@@ -70,6 +70,14 @@ Depois que o script roda pelo menos uma vez numa conta (até ~90s após abrir o 
 Seis módulos que faltavam: **Cunhar Moedas & Puxar Recursos**, **Troca Premium**, **Derrubar Muralha**, **Snip por Cancelamento**, **Etiquetador de Comandos** e um diagnóstico de **Upar Paladino** (esse último ainda não faz nada de verdade — só relata o que vê na tela, porque não tenho referência confiável do mecanismo real; me manda uma captura de rede de alguém treinando o paladino manualmente que eu termino).
 
 Todos nascem em **modo teste** e nenhum foi testado contra o jogo ainda — ligue o modo real um de cada vez e me avise o que funcionar ou falhar.
+
+## Novidades (v1.6.0)
+
+- **Recrutamento por metas** — reescrito do zero. Antes era "recruta N por ciclo, pra sempre" (nunca parava sozinho). Agora, em "Ajustes finos", você define uma meta por tropa (ex.: 10 Lanceiros, 20 Bárbaros, 10 Espadachins — cada campo é o **total desejado**, não por ciclo). O script recruta conforme os recursos permitem e **para sozinho** quando cada meta é atingida — sem loop infinito. Aumentar uma meta depois retoma de onde parou; o botão "Resetar progresso" no painel do jogo zera pra uma campanha nova com os mesmos números.
+- **Construção e Auto Farm não precisam mais estar na tela certa** — antes, Auto Farm/Derrubar Muralha só agiam se a aba estivesse parada na Praça de Reunião, mesmo o envio em si já funcionando via requisição direta. Agora rodam em qualquer tela.
+- **Fila de construção com prioridade editável** — no cartão "Construção", a fila agora é uma lista visual (não mais um texto solto) com setas pra subir/descer a prioridade de cada passo, excluir ou adicionar. A ordem da lista é a ordem que o script segue.
+- **Coleta com teto por tropa** — em vez de só excluir uma tropa inteira, agora dá pra definir um limite de quantidade por tropa (deixe em branco pra "sem limite", ou `0` pra nunca usar aquela tropa).
+- **"Ao vivo" mostra recrutamento e comandos a caminho** — o mesmo cartão que já mostrava construção agora também lista o que está sendo recrutado e os comandos (ataques/apoios) a caminho, atualizado com mais frequência (~35s).
 
 ## Restaurar alvos
 

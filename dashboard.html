@@ -409,6 +409,15 @@ kbd {
 .tpl-name small { font-weight: 400; color: var(--text-3); font-size: 11px; white-space: nowrap; }
 .tpl-unit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .tpl-unit-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--text-2); }
+.cap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.cap-row { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--text-2); }
+.cap-row input { height: 34px; }
+.queue-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.queue-row { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--ink-1); }
+.queue-badge { width: 20px; height: 20px; border-radius: 50%; background: var(--ember-soft); color: var(--ember); font-family: var(--mono); font-size: 10.5px; display: grid; place-items: center; flex: none; }
+.queue-label { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.queue-add { display: grid; grid-template-columns: 1fr 70px auto; gap: 8px; margin-top: 8px; }
+.queue-add select.field { height: 40px; }
 
 .fine-wrap { border-top: 1px dashed var(--line-2); padding-top: 10px; }
 .fine-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); padding: 2px 0; }
@@ -755,6 +764,11 @@ const ATTACK_UNITS = [
   { value: 'snob', label: 'Nobre' },
 ];
 const attackUnitLabel = (v) => (ATTACK_UNITS.find((u) => u.value === v) || { label: v }).label;
+// As únicas tropas que o jogo aceita em expedições de coleta — paladino,
+// aríete, catapulta e nobre nunca participam, então nem aparecem aqui.
+const SCAVENGE_UNITS = UNITS.filter((u) => u.value !== 'spy');
+// Tropas que o recrutamento automático sabe pedir (quartel/estábulo/oficina) — sem paladino/nobre.
+const RECRUIT_UNITS = [...UNITS, { value: 'ram', label: 'Aríete' }, { value: 'catapult', label: 'Catapulta' }];
 
 const GROUPS = ['Ofensiva', 'Exército', 'Economia', 'Alertas'];
 const MODULES = [
@@ -800,19 +814,23 @@ const MODULES = [
   },
   {
     id: 'auto-recruit', name: 'Recrutamento', group: 'Exército', icon: 'swords', screen: 'Quartel',
-    desc: 'Mantém a fila de recrutamento girando com a unidade escolhida.',
-    defaults: { unit: 'light', amount: 10, interval: 5000, dryRun: true },
+    desc: 'Recruta até bater a meta de cada tropa e para sozinho — não fica pedindo mais depois de completar.',
+    defaults: { goals: {}, reservePercent: 20, maxQueueOrders: 2, dryRun: true },
+    recruitGoals: true,
     presets: [
-      { id: 'lanca', label: 'Lanceiros', settings: { unit: 'spear', amount: 20 } },
-      { id: 'barbaro', label: 'Bárbaros', settings: { unit: 'axe', amount: 25 } },
-      { id: 'cl', label: 'Cavalaria leve', settings: { unit: 'light', amount: 10 } },
+      { id: 'defesa', label: 'Defesa básica', settings: { goals: { spear: 100, sword: 50 } } },
+      { id: 'ofensiva', label: 'Ofensiva leve', settings: { goals: { axe: 50, light: 20 } } },
+      { id: 'cerco', label: 'Cerco', settings: { goals: { ram: 10, catapult: 5 } } },
     ],
-    hint: (s) => `${s.amount} × ${unitLabel(s.unit)} · a cada ${Math.round(s.interval / 1000)}s`,
+    hint: (s) => {
+      const goals = Object.entries(s.goals || {}).filter(([, g]) => g > 0);
+      return goals.length ? `${goals.length} meta(s): ${goals.map(([u, g]) => `${g} ${unitLabel(u)}`).join(', ')}` : 'sem metas configuradas';
+    },
     fields: [
-      { key: 'unit', type: 'select', label: 'Unidade', options: UNITS },
-      { key: 'amount', type: 'range', label: 'Quantidade por ciclo', min: 1, max: 300, step: 1, unit: 'un.' },
-      { key: 'interval', type: 'range', label: 'Intervalo', min: 3000, max: 120000, step: 1000, scale: 1000, unit: 's' },
+      { key: 'reservePercent', type: 'range', label: 'Reserva de recursos', min: 0, max: 80, step: 5, unit: '%' },
+      { key: 'maxQueueOrders', type: 'range', label: 'Máximo de ordens na fila', min: 1, max: 10, step: 1, unit: 'ordens' },
     ],
+    note: 'Defina a quantidade TOTAL desejada de cada tropa abaixo (não é por ciclo). O script recruta conforme os recursos permitem e para quando a meta é atingida — sem loop infinito. Aumentar uma meta depois retoma de onde parou; "Resetar progresso" no painel do jogo zera pra uma campanha nova.',
   },
   {
     id: 'auto-defense', name: 'Auto Defesa', group: 'Exército', icon: 'shield', screen: 'Qualquer tela',
@@ -905,8 +923,9 @@ const MODULES = [
   },
   {
     id: 'auto-collect', name: 'Coleta', group: 'Economia', icon: 'basket', screen: 'Coleta',
-    desc: 'Envia e recolhe as coletas de recursos automaticamente.',
-    defaults: { interval: 3000, dryRun: true },
+    desc: 'Envia expedições de coleta sozinho, usando as tropas disponíveis na aldeia atual.',
+    defaults: { interval: 3000, unitCaps: {}, dryRun: true },
+    unitCaps: true,
     presets: [
       { id: 'rapida', label: 'Rápida', settings: { interval: 3000 } },
       { id: 'normal', label: 'Normal', settings: { interval: 10000 } },
@@ -914,11 +933,13 @@ const MODULES = [
     ],
     hint: (s) => `Verifica a cada ${Math.round(s.interval / 1000)}s`,
     fields: [{ key: 'interval', type: 'range', label: 'Intervalo', min: 1000, max: 120000, step: 1000, scale: 1000, unit: 's' }],
+    note: 'Deixe um campo vazio pra "sem limite" (usa tudo que estiver disponível). Coloque 0 pra nunca usar aquela tropa na coleta.',
   },
   {
     id: 'mass-collect', name: 'Coleta em Massa', group: 'Economia', icon: 'layers', screen: 'Assistente de saque',
-    desc: 'Clica nos saques do assistente em lotes, com pausa entre eles.',
-    defaults: { interval: 1000, maxPerBatch: 10, dryRun: true },
+    desc: 'Coleta em todas as aldeias, uma de cada vez, com pausa entre elas.',
+    defaults: { interval: 1000, maxPerBatch: 10, unitCaps: {}, dryRun: true },
+    unitCaps: true,
     presets: [
       { id: 'b5', label: 'Lote pequeno', settings: { maxPerBatch: 5 } },
       { id: 'b10', label: 'Lote médio', settings: { maxPerBatch: 10 } },
@@ -926,9 +947,10 @@ const MODULES = [
     ],
     hint: (s) => `${s.maxPerBatch} por lote · ${(s.interval / 1000).toFixed(1).replace('.0', '')}s`,
     fields: [
-      { key: 'maxPerBatch', type: 'range', label: 'Saques por lote', min: 1, max: 50, step: 1, unit: 'un.' },
-      { key: 'interval', type: 'range', label: 'Intervalo', min: 500, max: 10000, step: 500, scale: 1000, unit: 's', decimals: 1 },
+      { key: 'maxPerBatch', type: 'range', label: 'Aldeias por lote', min: 1, max: 50, step: 1, unit: 'un.' },
+      { key: 'interval', type: 'range', label: 'Pausa entre aldeias', min: 500, max: 10000, step: 500, scale: 1000, unit: 's', decimals: 1 },
     ],
+    note: 'Os tetos de tropa valem em todas as aldeias por igual. Deixe vazio pra "sem limite", ou 0 pra nunca usar aquela tropa.',
   },
   {
     id: 'resource-balancer', name: 'Balanceador', group: 'Economia', icon: 'scale', screen: 'Visão das aldeias',
@@ -947,14 +969,21 @@ const MODULES = [
   },
   {
     id: 'mega-builder', name: 'Construção', group: 'Economia', icon: 'hammer', screen: 'Edifício principal',
-    desc: 'Coloca a próxima construção disponível na fila sempre que houver espaço.',
-    defaults: { interval: 60000, dryRun: true },
+    desc: 'Coloca a próxima construção disponível na fila sempre que houver espaço, seguindo a prioridade abaixo.',
+    defaults: {
+      interval: 60000, dryRun: true,
+      queue: 'wood:1, stone:1, iron:1, wood:2, stone:2, main:2, farm:2, storage:2, wood:3, stone:3, iron:2, main:3, barracks:1, wood:5, stone:5, iron:4, storage:5, farm:5, main:5, market:1, smith:1, wood:10, stone:10, iron:8, storage:10, farm:10, main:10, wall:5',
+    },
+    queueEditor: true,
     presets: [
-      { id: 'normal', label: 'Ritmo normal', settings: { interval: 60000 } },
-      { id: 'calmo', label: 'Ritmo calmo', settings: { interval: 180000 } },
+      { id: 'equilibrado', label: 'Equilibrado (padrão)', settings: { queue: 'wood:1, stone:1, iron:1, wood:2, stone:2, main:2, farm:2, storage:2, wood:3, stone:3, iron:2, main:3, barracks:1, wood:5, stone:5, iron:4, storage:5, farm:5, main:5, market:1, smith:1, wood:10, stone:10, iron:8, storage:10, farm:10, main:10, wall:5' } },
+      { id: 'economia', label: 'Objetivo: Economia', settings: { queue: 'wood:5, stone:5, iron:5, farm:5, storage:5, main:5, market:3, wood:10, stone:10, iron:10, farm:10, storage:10, main:8, wood:15, stone:15, iron:15, storage:15, farm:15' } },
+      { id: 'militar', label: 'Objetivo: Militar', settings: { queue: 'main:3, barracks:3, wood:3, stone:3, iron:3, farm:3, storage:3, stable:3, wall:5, barracks:10, stable:10, smith:5, wall:10, garage:5, main:10' } },
+      { id: 'crescimento', label: 'Objetivo: Crescimento', settings: { queue: 'main:5, farm:5, wood:3, stone:3, iron:3, storage:3, main:10, farm:10, wood:6, stone:6, iron:6, storage:6, main:15, farm:15' } },
     ],
-    hint: (s) => `Verifica a cada ~${Math.round(s.interval / 1000)}s`,
+    hint: (s) => `${parseQueueSteps(s.queue).length} passo(s) na fila · a cada ~${Math.round(s.interval / 1000)}s`,
     fields: [{ key: 'interval', type: 'range', label: 'Intervalo (vale a partir do próximo carregamento da página)', min: 20000, max: 300000, step: 10000, scale: 1000, unit: 's' }],
+    note: 'A fila acima é a prioridade real: o script sempre constrói o primeiro passo ainda não satisfeito. Use um objetivo pra começar, depois reordene/adicione/remova passos à vontade.',
   },
   {
     id: 'notif-discord', name: 'Alertas no Discord', group: 'Alertas', icon: 'bell', screen: 'Qualquer tela', noTestMode: true,
@@ -985,7 +1014,7 @@ const BUILTIN_MODELS = [
     modules: {
       'auto-farm': { enabled: true, settings: { maxDistance: 20, cooldownMinutes: 15 } },
       'mass-collect': { enabled: true, settings: { maxPerBatch: 25 } },
-      'auto-recruit': { enabled: true, settings: { unit: 'light', amount: 10 } },
+      'auto-recruit': { enabled: true, settings: { goals: { light: 50 } } },
     },
   },
   {
@@ -1497,13 +1526,14 @@ function statsHTML(key) {
 
 function liveHTML(key) {
   const s = state.accounts[key];
-  if (!s || (!s.resources && !s.buildQueue)) {
-    return `<div class="livecard livecard-empty">${icon('bolt', 'sm')}<span>Status ao vivo aparece aqui assim que o script rodar uma vez nesta conta (até ~90s depois de abrir o jogo — a fila de construção só aparece com o módulo Construção ligado).</span></div>`;
+  const hasAnything = s && (s.resources || s.buildQueue || s.trainQueue);
+  if (!hasAnything) {
+    return `<div class="livecard livecard-empty">${icon('bolt', 'sm')}<span>Status ao vivo aparece aqui assim que o script rodar uma vez nesta conta (até ~60s depois de abrir o jogo) — funciona mesmo com os outros módulos desligados.</span></div>`;
   }
 
   let resourcesHTML = '';
   let troopsHTML = '';
-  let incoming = '';
+  let tags = '';
   if (s.resources) {
     const res = s.resources;
     const pct = (n) => res.storageMax ? Math.min(100, Math.round((n / res.storageMax) * 100)) : 0;
@@ -1518,28 +1548,28 @@ function liveHTML(key) {
     troopsHTML = `<div class="livetroops">${troops && troops.length
       ? troops.map(([u, n]) => `<span class="troop-chip">${fmt(n)} <small>${esc(attackUnitLabel(u))}</small></span>`).join('')
       : '<span class="note">sem tropas em casa (ou não lido ainda)</span>'}</div>`;
-    incoming = s.incomingAttacks
-      ? `<span class="tag tag-off" style="background:var(--rose-soft);color:var(--rose)">⚠ ${s.incomingAttacks} ataque${s.incomingAttacks > 1 ? 's' : ''} a caminho</span>`
-      : (s.incoming !== undefined ? '<span class="tag tag-live">sem ataques a caminho</span>' : '');
+    if (s.incomingAttacks) tags += `<span class="tag tag-off" style="background:var(--rose-soft);color:var(--rose)">⚠ ${s.incomingAttacks} chegando</span>`;
+    if (s.outgoingAttacks) tags += `<span class="tag tag-off" style="background:var(--ember-soft);color:var(--ember)">⚔ ${s.outgoingAttacks} a caminho</span>`;
+    if (!s.incomingAttacks && !s.outgoingAttacks && s.incoming !== undefined) tags += '<span class="tag tag-live">sem comandos ativos</span>';
   }
 
-  let buildHTML = '';
-  if (s.buildQueue) {
-    buildHTML = `
-      <div class="livesub">${icon('hammer', 'sm')}Construindo</div>
-      <div class="livequeue">${s.buildQueue.length
-        ? s.buildQueue.map((q) => `<div class="livequeue-row"><span>${esc(q.name)}${q.level ? ` nv.${q.level}` : ''}</span><span class="mono">${esc(q.remaining || q.etaText || '')}</span></div>`).join('')
-        : '<span class="note">fila vazia agora</span>'}</div>`;
-  }
+  const queueBlock = (title, iconName, items, render) => items ? `
+      <div class="livesub">${icon(iconName, 'sm')}${title}</div>
+      <div class="livequeue">${items.length ? items.map(render).join('') : '<span class="note">nada agora</span>'}</div>` : '';
+
+  const buildHTML = queueBlock('Construindo', 'hammer', s.buildQueue,
+    (q) => `<div class="livequeue-row"><span>${esc(q.name)}${q.level ? ` nv.${q.level}` : ''}</span><span class="mono">${esc(q.remaining || q.etaText || '')}</span></div>`);
+  const trainHTML = queueBlock('Recrutando', 'swords', s.trainQueue,
+    (t) => `<div class="livequeue-row"><span>${esc(t.building)}: ${esc(t.name)}</span><span class="mono">${esc(t.remaining || '')}</span></div>`);
 
   return `
     <div class="livecard">
       <div class="livecard-head">
         <b>${icon('bolt', 'sm')}Ao vivo</b>
-        ${incoming}
+        ${tags}
         <span class="note" style="margin-left:auto">atualizado ${esc(ago(s.at || s.buildQueueAt || s.lastSeen))}</span>
       </div>
-      ${resourcesHTML}${troopsHTML}${buildHTML}
+      ${resourcesHTML}${troopsHTML}${buildHTML}${trainHTML}
     </div>`;
 }
 
@@ -1584,8 +1614,71 @@ function tileHTML(m, cfg) {
         ${icon('chev', 'sm')}
       </button>
       ${m.templates ? templatesHTML(m, cfg) : ''}
+      ${m.unitCaps ? unitCapsHTML(m, cfg) : ''}
+      ${m.queueEditor ? queueEditorHTML(m, cfg) : ''}
+      ${m.recruitGoals ? recruitGoalsHTML(m, cfg) : ''}
       ${fine}
     </article>`;
+}
+
+function unitCapsHTML(m, cfg) {
+  const caps = cfg.settings.unitCaps || {};
+  const rows = SCAVENGE_UNITS.map((u) => `
+    <label class="cap-row">
+      <span>${esc(u.label)}</span>
+      <input type="number" min="0" class="field" placeholder="sem limite" value="${caps[u.value] ?? ''}" data-cap="${m.id}:${u.value}">
+    </label>`).join('');
+  return `<div class="tpl-box"><div class="cap-grid">${rows}</div></div>`;
+}
+
+function recruitGoalsHTML(m, cfg) {
+  const goals = cfg.settings.goals || {};
+  const rows = RECRUIT_UNITS.map((u) => `
+    <label class="cap-row">
+      <span>${esc(u.label)}</span>
+      <input type="number" min="0" class="field" placeholder="0" value="${goals[u.value] ?? ''}" data-goal="${m.id}:${u.value}">
+    </label>`).join('');
+  return `<div class="tpl-box"><div class="cap-grid">${rows}</div></div>`;
+}
+
+const BUILDING_LABELS = {
+  main: 'Edifício principal', barracks: 'Quartel', stable: 'Estábulo', garage: 'Oficina',
+  church: 'Igreja', church_f: 'Primeira igreja', watchtower: 'Torre', snob: 'Academia',
+  smith: 'Ferreiro', place: 'Praça', statue: 'Estátua', market: 'Mercado',
+  wood: 'Bosque', stone: 'Poço de argila', iron: 'Mina de ferro', farm: 'Fazenda',
+  storage: 'Armazém', hide: 'Esconderijo', wall: 'Muralha',
+};
+
+function parseQueueSteps(text) {
+  return String(text || '').split(/[,;\n]+/).map((p) => p.trim()).filter(Boolean).map((p) => {
+    const [b, lvl] = p.split(':').map((x) => x.trim());
+    return { building: b, level: Number(lvl) || 1 };
+  }).filter((s) => BUILDING_LABELS[s.building]);
+}
+function stepsToQueue(steps) {
+  return steps.map((s) => `${s.building}:${s.level}`).join(', ');
+}
+
+function queueEditorHTML(m, cfg) {
+  const steps = parseQueueSteps(cfg.settings.queue);
+  const rows = steps.map((s, i) => `
+    <div class="queue-row">
+      <span class="queue-badge">${i + 1}</span>
+      <span class="queue-label">${esc(BUILDING_LABELS[s.building] || s.building)} → nv.${s.level}</span>
+      <button class="icon-btn" style="height:26px;padding:0 6px" data-queue-up="${m.id}:${i}" type="button" title="Subir prioridade" ${i === 0 ? 'disabled' : ''}>${icon('up', 'sm')}</button>
+      <button class="icon-btn" style="height:26px;padding:0 6px" data-queue-down="${m.id}:${i}" type="button" title="Descer prioridade" ${i === steps.length - 1 ? 'disabled' : ''}>${icon('down', 'sm')}</button>
+      <button class="icon-btn" style="height:26px;padding:0 6px" data-queue-del="${m.id}:${i}" type="button" title="Remover">${icon('trash', 'sm')}</button>
+    </div>`).join('');
+  const options = Object.entries(BUILDING_LABELS).map(([value, label]) => `<option value="${value}">${esc(label)}</option>`).join('');
+  return `
+    <div class="tpl-box">
+      <div class="queue-list">${rows || '<p class="note" style="margin:6px 0">Fila vazia.</p>'}</div>
+      <div class="queue-add">
+        <select class="field" data-queue-add-building="${m.id}">${options}</select>
+        <input type="number" min="1" max="30" value="1" class="field" data-queue-add-level="${m.id}">
+        <button class="btn-ghost btn-sm" data-queue-add-confirm="${m.id}" type="button">${icon('plus', 'sm')}Adicionar</button>
+      </div>
+    </div>`;
 }
 
 function templatesHTML(m, cfg) {
@@ -1936,7 +2029,7 @@ main.addEventListener('click', (e) => {
   if (fine) {
     const id = fine.dataset.fine;
     state.openFine.has(id) ? state.openFine.delete(id) : state.openFine.add(id);
-    fine.parentElement.classList.toggle('open');
+    fine.closest('.fine-wrap').classList.toggle('open');
     return;
   }
 
@@ -1998,6 +2091,49 @@ main.addEventListener('click', (e) => {
       rerenderTile(id);
       refreshChrome();
     }
+    return;
+  }
+
+  const qUp = t.closest('[data-queue-up]');
+  const qDown = t.closest('[data-queue-down]');
+  if (qUp || qDown) {
+    const [id, idxStr] = (qUp || qDown).dataset[qUp ? 'queueUp' : 'queueDown'].split(':');
+    const i = Number(idxStr);
+    const cfg = p.modules[id];
+    const steps = parseQueueSteps(cfg.settings.queue);
+    const j = qUp ? i - 1 : i + 1;
+    if (j < 0 || j >= steps.length) return;
+    [steps[i], steps[j]] = [steps[j], steps[i]];
+    cfg.settings.queue = stepsToQueue(steps);
+    touch(key);
+    rerenderTile(id);
+    return;
+  }
+
+  const qDel = t.closest('[data-queue-del]');
+  if (qDel) {
+    const [id, idxStr] = qDel.dataset.queueDel.split(':');
+    const cfg = p.modules[id];
+    const steps = parseQueueSteps(cfg.settings.queue);
+    steps.splice(Number(idxStr), 1);
+    cfg.settings.queue = stepsToQueue(steps);
+    touch(key);
+    rerenderTile(id);
+    return;
+  }
+
+  const qAdd = t.closest('[data-queue-add-confirm]');
+  if (qAdd) {
+    const id = qAdd.dataset.queueAddConfirm;
+    const cfg = p.modules[id];
+    const buildingSel = main.querySelector(`[data-queue-add-building="${id}"]`);
+    const levelInput = main.querySelector(`[data-queue-add-level="${id}"]`);
+    const steps = parseQueueSteps(cfg.settings.queue);
+    steps.push({ building: buildingSel.value, level: Math.max(1, Number(levelInput.value) || 1) });
+    cfg.settings.queue = stepsToQueue(steps);
+    touch(key);
+    rerenderTile(id);
+    return;
   }
 });
 
@@ -2021,6 +2157,28 @@ main.addEventListener('input', (e) => {
   if (tx) {
     const [id, fk] = tx.dataset.fieldText.split('.');
     state.profiles[key].modules[id].settings[fk] = tx.value.trim();
+    refreshTile(id);
+    touch(key);
+    return;
+  }
+  const cap = e.target.closest('[data-cap]');
+  if (cap) {
+    const [id, unit] = cap.dataset.cap.split(':');
+    const cfg = state.profiles[key].modules[id];
+    cfg.settings.unitCaps = cfg.settings.unitCaps || {};
+    const raw = cap.value.trim();
+    if (raw === '') delete cfg.settings.unitCaps[unit];
+    else cfg.settings.unitCaps[unit] = Math.max(0, Math.round(Number(raw)) || 0);
+    touch(key);
+  }
+  const goal = e.target.closest('[data-goal]');
+  if (goal) {
+    const [id, unit] = goal.dataset.goal.split(':');
+    const cfg = state.profiles[key].modules[id];
+    cfg.settings.goals = cfg.settings.goals || {};
+    const raw = goal.value.trim();
+    if (raw === '' || Number(raw) <= 0) delete cfg.settings.goals[unit];
+    else cfg.settings.goals[unit] = Math.max(0, Math.round(Number(raw)) || 0);
     refreshTile(id);
     touch(key);
   }
