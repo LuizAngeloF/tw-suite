@@ -53,6 +53,10 @@ Ligado em modo real, o Auto Farm ataca sozinho, sem parar — não precisa mais 
 
 Depois que o script roda pelo menos uma vez numa conta (até ~90s após abrir o jogo), o dossiê ganha um cartão **Ao vivo** com barras de recursos, tropas paradas na aldeia e um aviso quando há ataque a caminho. Com o módulo **Construção** ligado, o mesmo cartão também mostra o que está sendo construído agora e o tempo restante. O dashboard busca essa informação a cada ~20s enquanto estiver aberto.
 
+## Relatórios de ataque (v1.7.0)
+
+O mesmo cartão **Ao vivo** agora também mostra os últimos ataques que você mandou — vitória/derrota, aldeia alvo, quanto saqueou e quantas tropas perdeu, cada um assim que o relatório chega. Não precisa ligar nenhum módulo pra isso funcionar, é automático como o resto do "Ao vivo". Cobre só relatórios de **ataque** — apoio, comércio e outros tipos de relatório não aparecem aqui.
+
 ## Se não sincronizar
 
 1. **Primeiro, use `start-dashboard.bat`** em vez do arquivo direto — resolve a maioria dos casos, porque tira a permissão de arquivo local da equação inteira.

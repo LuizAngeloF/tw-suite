@@ -1526,7 +1526,7 @@ function statsHTML(key) {
 
 function liveHTML(key) {
   const s = state.accounts[key];
-  const hasAnything = s && (s.resources || s.buildQueue || s.trainQueue);
+  const hasAnything = s && (s.resources || s.buildQueue || s.trainQueue || s.battleLog);
   if (!hasAnything) {
     return `<div class="livecard livecard-empty">${icon('bolt', 'sm')}<span>Status ao vivo aparece aqui assim que o script rodar uma vez nesta conta (até ~60s depois de abrir o jogo) — funciona mesmo com os outros módulos desligados.</span></div>`;
   }
@@ -1561,6 +1561,14 @@ function liveHTML(key) {
     (q) => `<div class="livequeue-row"><span>${esc(q.name)}${q.level ? ` nv.${q.level}` : ''}</span><span class="mono">${esc(q.remaining || q.etaText || '')}</span></div>`);
   const trainHTML = queueBlock('Recrutando', 'swords', s.trainQueue,
     (t) => `<div class="livequeue-row"><span>${esc(t.building)}: ${esc(t.name)}</span><span class="mono">${esc(t.remaining || '')}</span></div>`);
+  const battleHTML = queueBlock('Relatórios de ataque', 'basket', s.battleLog,
+    (b) => {
+      const resIcon = b.resultIcon === 'green' ? '✅' : b.resultIcon === 'yellow' ? '⚠️' : '❔';
+      const lootTxt = b.lootTotal ? `saque ${fmt(b.lootTotal)}` : '';
+      const lossTxt = b.lostAtt ? `perdi ${fmt(b.lostAtt)}` : '';
+      const detail = [lootTxt, lossTxt].filter(Boolean).join(' · ');
+      return `<div class="livequeue-row"><span>${resIcon} ${esc(b.target || b.title || '?')}</span><span class="mono">${esc(detail)}</span></div>`;
+    });
 
   return `
     <div class="livecard">
@@ -1569,7 +1577,7 @@ function liveHTML(key) {
         ${tags}
         <span class="note" style="margin-left:auto">atualizado ${esc(ago(s.at || s.buildQueueAt || s.lastSeen))}</span>
       </div>
-      ${resourcesHTML}${troopsHTML}${buildHTML}${trainHTML}
+      ${resourcesHTML}${troopsHTML}${buildHTML}${trainHTML}${battleHTML}
     </div>`;
 }
 

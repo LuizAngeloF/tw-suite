@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.6.3
+// @version      1.7.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1452,6 +1452,106 @@
     };
   }
 
+  // ---------- relatórios de ataque ----------
+  // Lista da tela `screen=report&mode=attack` — CONFIRMADO ao vivo
+  // (2026-09-20, HTML real do usuário: lista e um relatório aberto). Cada
+  // linha é `tr[class*="report-"]` (opcionalmente prefixada "unread "),
+  // com o id vindo de `data-id` no `.report-link` (mais confiável que
+  // extrair da classe da linha).
+  async function getAttackReportsList(vid, { limit = 20 } = {}) {
+    try {
+      const { doc } = await getPage(`/game.php?village=${vid}&screen=report&mode=attack`);
+      const rows = [];
+      for (const tr of doc.querySelectorAll('#report_list tr[class*="report-"]')) {
+        const link = tr.querySelector('.report-link[data-id]');
+        if (!link) continue;
+        const labelEl = tr.querySelector('.quickedit-label');
+        const dotEl = tr.querySelector('img[src*="/dots/"]');
+        const dateEl = tr.querySelector('td.nowrap');
+        const iconMatch = dotEl ? (dotEl.getAttribute('src') || '').match(/dots\/(\w+)\.webp/) : null;
+        rows.push({
+          id: link.getAttribute('data-id'),
+          title: labelEl ? labelEl.textContent.replace(/\s+/g, ' ').trim() : null,
+          resultLabel: dotEl ? dotEl.getAttribute('title') : null,
+          resultIcon: iconMatch ? iconMatch[1] : null,
+          unread: /(^|\s)unread(\s|$)/.test(tr.className),
+          receivedAtText: dateEl ? dateEl.textContent.trim() : null,
+        });
+        if (rows.length >= limit) break;
+      }
+      return rows;
+    } catch (e) {
+      if (e instanceof BotCheckError) throw e;
+      return null;
+    }
+  }
+
+  // Lê uma linha "Quantidade:"/"Perdas:" de uma tabela de tropas de relatório
+  // (`#attack_info_att_units`/`#attack_info_def_units`) — cada célula de
+  // unidade tem `data-unit-count` e uma classe `unit-item-<unidade>`.
+  function parseReportUnitRow(table, rowLabel) {
+    const out = {};
+    if (!table) return out;
+    for (const tr of table.querySelectorAll('tr')) {
+      const firstTd = tr.querySelector('td');
+      if (!firstTd || !firstTd.textContent.trim().startsWith(rowLabel)) continue;
+      for (const td of tr.querySelectorAll('td[data-unit-count]')) {
+        const unitClass = [...td.classList].find((c) => c.startsWith('unit-item-') && c !== 'unit-item');
+        const unit = unitClass ? unitClass.replace('unit-item-', '') : null;
+        if (unit) out[unit] = Number(td.getAttribute('data-unit-count')) || 0;
+      }
+      break;
+    }
+    return out;
+  }
+
+  // Relatório de ataque aberto (`screen=report&mode=all&group_id=0&view=<id>`)
+  // — CONFIRMADO ao vivo. Extrai tropas enviadas/perdidas dos dois lados,
+  // saque e aldeia de origem/destino. Só cobre relatórios de ATAQUE
+  // (`report_ReportAttack`) — apoio/comércio/outros tipos têm layout
+  // diferente, não tratado aqui.
+  async function getAttackReportDetail(vid, reportId) {
+    try {
+      const { doc } = await getPage(`/game.php?village=${vid}&screen=report&mode=all&group_id=0&view=${reportId}`);
+      const titleEl = doc.querySelector('.quickedit-label');
+      const dotEl = doc.querySelector('table.vis img[src*="/dots/"]');
+      const resultH3 = doc.querySelector('.report_ReportAttack h3');
+      const attTable = doc.querySelector('#attack_info_att_units');
+      const defTable = doc.querySelector('#attack_info_def_units');
+      const origin = doc.querySelector('#attack_info_att .village_anchor');
+      const target = doc.querySelector('#attack_info_def .village_anchor');
+      const lootRow = doc.querySelector('#attack_results tr');
+      let loot = null;
+      if (lootRow) {
+        loot = {};
+        for (const span of lootRow.querySelectorAll('span.nowrap')) {
+          const iconEl = span.querySelector('[class*="icon header"]');
+          const cls = iconEl ? RESOURCES.find((r) => iconEl.classList.contains(r)) : null;
+          if (cls) loot[cls] = num(span.textContent);
+        }
+        const capacityTd = lootRow.querySelectorAll('td')[1];
+        if (capacityTd) loot.capacityText = capacityTd.textContent.trim();
+      }
+      if (!attTable && !defTable) return null; // não é um relatório de ataque (layout diferente)
+      return {
+        id: reportId,
+        title: titleEl ? titleEl.textContent.replace(/\s+/g, ' ').trim() : null,
+        resultLabel: dotEl ? dotEl.getAttribute('title') : null,
+        resultText: resultH3 ? resultH3.textContent.trim() : null,
+        attackerSent: parseReportUnitRow(attTable, 'Quantidade'),
+        attackerLosses: parseReportUnitRow(attTable, 'Perdas'),
+        defenderTroops: parseReportUnitRow(defTable, 'Quantidade'),
+        defenderLosses: parseReportUnitRow(defTable, 'Perdas'),
+        origin: origin ? { id: origin.getAttribute('data-id'), playerId: origin.getAttribute('data-player'), name: origin.textContent.replace(/\s+/g, ' ').trim() } : null,
+        target: target ? { id: target.getAttribute('data-id'), playerId: target.getAttribute('data-player'), name: target.textContent.replace(/\s+/g, ' ').trim() } : null,
+        loot,
+      };
+    } catch (e) {
+      if (e instanceof BotCheckError) throw e;
+      return null;
+    }
+  }
+
   TW.shared = {
     TAB_ID, pageWin, UNITS, UNIT_LABELS, RESOURCES, RES_LABELS, BotCheckError,
     sleep, jitter, gd, csrf, villageId, dist, num, parseHtml, gameDataFromHtml, formParams,
@@ -1459,7 +1559,7 @@
     prepareCommand, confirmCommand, sendCommand, availableUnits, listCancelableCommands, cancelLinks, cancelCommand,
     sendResources, premiumExchange, premiumExchangeRates, getVillageIndex, myVillages, parseGameTime, formatServerTime, serverWallOffsetMs, worldConfig,
     notify, acquireLock, loop, h, card, parseUnitList, getIncomingAttacks, getOutgoingCommands, troopsHome,
-    readBuildQueue, getTrainQueue, buildLiveSnapshot,
+    readBuildQueue, getTrainQueue, buildLiveSnapshot, getAttackReportsList, getAttackReportDetail,
   };
 })();
 
@@ -1534,6 +1634,104 @@
         accounts[key] = { ...(accounts[key] || {}), ...snap, lastSeen: Date.now() };
         await ctx.storage.set('accounts', accounts);
       }, 15000, 25000);
+    },
+  });
+})();
+
+// ============================================================
+// MÓDULO INTERNO: battle-reports — relatórios de ataque (saque, perdas)
+//
+// Pedido do usuário: "relatórios de ataques (aldeias saqueadas, tropas
+// abatidas, recursos roubados)". Sempre ativo, mesmo padrão do live-status.
+// A cada ciclo lê a lista de `screen=report&mode=attack` (CONFIRMADO ao
+// vivo, ver shared.js/getAttackReportsList) e, pra qualquer id novo nunca
+// visto (rastreado em storage), busca o relatório aberto
+// (getAttackReportDetail, também CONFIRMADO ao vivo) e guarda um resumo
+// num log com os últimos 50, tanto no painel do jogo quanto em
+// storage:'accounts' pro dashboard.
+// ============================================================
+(function registerBattleReports() {
+  'use strict';
+  const TW = window.TWSuite;
+  const S = TW.shared;
+  const MODULE_ID = 'battle-reports';
+  const LOG_LIMIT = 50;
+  const SEEN_LIMIT = 300; // teto pra lista de ids já processados não crescer pra sempre
+
+  function summarize(row, detail) {
+    const lostAtt = detail ? Object.values(detail.attackerLosses || {}).reduce((a, b) => a + b, 0) : null;
+    const lostDef = detail ? Object.values(detail.defenderLosses || {}).reduce((a, b) => a + b, 0) : null;
+    const lootTotal = detail && detail.loot ? S.RESOURCES.reduce((sum, r) => sum + (detail.loot[r] || 0), 0) : null;
+    return {
+      id: row.id,
+      title: (detail && detail.title) || row.title,
+      resultLabel: (detail && detail.resultLabel) || row.resultLabel,
+      resultIcon: row.resultIcon,
+      target: detail && detail.target ? detail.target.name : null,
+      lostAtt, lostDef, lootTotal,
+      loot: detail ? detail.loot : null,
+      at: Date.now(),
+    };
+  }
+
+  function renderList(host, log) {
+    host.innerHTML = '';
+    if (!log || !log.length) {
+      host.appendChild(S.h('div', { class: 'tws-muted', text: 'Nenhum relatório de ataque ainda.' }));
+      return;
+    }
+    for (const b of log.slice(0, 8)) {
+      const icon = b.resultIcon === 'green' ? '✅' : b.resultIcon === 'yellow' ? '⚠️' : '❔';
+      const lootTxt = b.lootTotal ? ` · saque ${b.lootTotal}` : '';
+      const lossTxt = b.lostAtt ? ` · perdi ${b.lostAtt}` : '';
+      host.appendChild(S.h('div', { class: 'tws-row', text: `${icon} ${b.target || b.title || '?'}${lootTxt}${lossTxt}` }));
+    }
+  }
+
+  TW.registerModule({
+    id: MODULE_ID,
+    name: 'Relatórios de Ataque (interno)',
+    screens: ['any'],
+    defaultEnabled: true,
+    async run(ctx) {
+      const ui = S.card(MODULE_ID, 'Relatórios de Ataque');
+      const listHost = S.h('div', { class: 'tws-list' });
+      ui.body.append(listHost);
+
+      S.loop(MODULE_ID, async () => {
+        const vid = S.villageId();
+        if (!vid) return;
+        const rows = await S.getAttackReportsList(vid, { limit: 15 });
+        if (!rows) return;
+
+        const seen = (await ctx.storage.get(`${MODULE_ID}:seen`, [])) || [];
+        const seenSet = new Set(seen);
+        // Só relatórios que realmente têm um resultado de combate (bolinha
+        // colorida) — a tela já vem filtrada por mode=attack, isso aqui é
+        // só uma rede de segurança contra algo inesperado na lista.
+        const newOnes = rows.filter((r) => r.resultIcon && !seenSet.has(r.id));
+
+        let log = (await ctx.storage.get(`${MODULE_ID}:log`, [])) || [];
+        for (const row of newOnes) {
+          const detail = await S.getAttackReportDetail(vid, row.id);
+          log.unshift(summarize(row, detail));
+          seenSet.add(row.id);
+        }
+        if (newOnes.length) {
+          log = log.slice(0, LOG_LIMIT);
+          await ctx.storage.set(`${MODULE_ID}:log`, log);
+          await ctx.storage.set(`${MODULE_ID}:seen`, [...seenSet].slice(-SEEN_LIMIT));
+        }
+
+        renderList(listHost, log);
+        ui.setStatus(newOnes.length ? `+${newOnes.length} novo(s) · atualizado ${new Date().toLocaleTimeString()}` : `atualizado ${new Date().toLocaleTimeString()}`);
+
+        const key = TW.accountKeyFromGame && TW.accountKeyFromGame();
+        if (!key) return;
+        const accounts = (await ctx.storage.get('accounts', {})) || {};
+        accounts[key] = { ...(accounts[key] || {}), battleLog: log.slice(0, 10), battleLogAt: Date.now() };
+        await ctx.storage.set('accounts', accounts);
+      }, 90000, 150000);
     },
   });
 })();

@@ -170,6 +170,21 @@ Arquitetura: processo Node.js separado (`multi-contas/`), porta própria (8788),
 
 **Ainda não implementado** (fases B–F do plano): proxy testado ponta a ponta, push de modelo/configuração em massa, comandos em massa, modo seguro configurável na UI, tribo automática, barbarização automática (esta última já nasce escopada pra só disparar o pedido de exclusão e depois notificar o humano — é bem provável que a confirmação final exija clicar num link de e-mail, fora do escopo).
 
+## Fase 10 — v1.7.0: Relatórios de ataque (saque, perdas)
+
+Pedido do usuário, pendente desde a Fase 8: "relatórios de ataques (aldeias saqueadas, tropas abatidas, recursos roubados)". Diferente do resto do lote v1.6.x, dessa vez o usuário mandou o HTML real de **duas** telas (lista de relatórios `screen=report&mode=attack` e um relatório de ataque aberto `screen=report&mode=all&group_id=0&view=<id>`) antes de eu escrever qualquer seletor — então o parser nasceu já testado contra dado real, em vez de UNVERIFIED-até-alguém-testar como o resto do projeto.
+
+**Testado com Playwright direto contra o HTML real do usuário antes de aplicar** (mesmo processo usado antes pra recrutamento/comandos): lista extraiu certo os 4 relatórios (distinguindo corretamente relatório de ataque — tem bolinha de resultado colorida — de outros tipos como "Paladino encontrou item" ou conquista, que não têm), e o relatório aberto extraiu certo tropas enviadas/perdidas dos dois lados, saque (63/77/60, bateu exato com o que estava no HTML) e origem/destino.
+
+Novo módulo interno `battle-reports` (mesmo padrão do `live-status`: sempre ativo, roda em qualquer tela, ciclo de 90-150s — mais espaçado que o live-status porque relatório novo não é algo que precisa aparecer em segundos). A cada ciclo:
+1. Lê `screen=report&mode=attack` (novo `getAttackReportsList` em `shared.js`).
+2. Pra qualquer id nunca visto (rastreado em `storage:'battle-reports:seen'`, teto de 300 ids), busca o relatório aberto (`getAttackReportDetail`) e monta um resumo (tropas perdidas de cada lado somadas, saque total, aldeia alvo).
+3. Guarda os últimos 50 num log (`storage:'battle-reports:log'`), mostra os 8 mais recentes num cartão próprio no painel do jogo, e espelha os 10 mais recentes em `storage:'accounts'` (`battleLog`) pro dashboard.
+
+Dashboard: novo bloco "Relatórios de ataque" no cartão "Ao vivo", mesmo padrão visual da fila de construção/recrutamento (ícone de resultado + aldeia + saque/perdas). Testado renderizando com dado fake injetado no `localStorage` do dashboard (não dá pra testar com dado real do jogo sem sessão ao vivo) — a estrutura visual está confirmada, só o preenchimento automático (o módulo escrevendo em `storage:'accounts'.battleLog` de verdade) que depende do próximo teste ao vivo do usuário.
+
+**Escopo desta versão, deliberadamente**: só relatórios de **ataque** (`mode=attack`) — apoio, comércio e outros tipos de relatório têm layout de detalhe diferente (`report_ReportAttack` só existe em relatórios de combate) e não são tratados. Também não tenta agregar estatísticas ("saque total hoje", "aldeias saqueadas essa semana") — só mostra o log recente cru; agregação fica pra depois, se o usuário pedir.
+
 ## Fases futuras (ainda não implementadas)
 
 - Auto Defesa: ainda no formato antigo (detecta "ataque" como texto solto na página — falso-positivo praticamente garantido). Candidato a reescrever com o mesmo parser de `info_command` do live-status, uma vez confirmado.
