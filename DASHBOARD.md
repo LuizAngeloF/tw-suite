@@ -112,6 +112,10 @@ Todos nascem em **modo teste** e nenhum foi testado contra o jogo ainda — ligu
 
 O botão "Restaurar alvos" do Auto Farm agora mostra o resultado direto na tela (antes só ia pro console, parecia não fazer nada). Também tem um botão igual no dashboard, ao lado de "Ajustes finos" — como o dashboard roda numa aba separada da do jogo, ele não limpa na hora: grava um pedido que a aba do jogo aplica sozinha no próprio ciclo (~8s depois).
 
+## Se tudo parar de atualizar de uma vez (v1.11.0)
+
+Se o "Ao vivo" congelar por completo — construção, recrutamento, comandos, tudo junto — é quase sempre a proteção anti-bot do jogo tendo sido detectada em algum momento (aparece um captcha, ou o jogo simplesmente bloqueia a página por suspeita). O script pausa **tudo** sozinho quando isso acontece, e agora mostra um aviso vermelho claro no lugar do "Ao vivo" normal, tanto no jogo quanto aqui no dashboard. Resolva o que estiver pedindo na aba do jogo e **recarregue a página** — isso limpa o aviso e volta tudo ao normal sozinho.
+
 ## Limitações conhecidas
 
 - **Ligar/desligar** um módulo só vale a partir do próximo carregamento de página. Já **ajustar valores** de um módulo que já está ligado (modelo de tropas, quantidade, intervalo) chega sem precisar recarregar.

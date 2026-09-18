@@ -1628,6 +1628,9 @@ function liveHTML(key) {
   if (!hasAnything) {
     return `<div class="livecard livecard-empty">${icon('bolt', 'sm')}<span>Status ao vivo aparece aqui assim que o script rodar uma vez nesta conta (até ~60s depois de abrir o jogo) — funciona mesmo com os outros módulos desligados.</span></div>`;
   }
+  if (s.botCheckActive) {
+    return `<div class="livecard livecard-empty" style="border-color:var(--rose);color:var(--rose)">⚠️<span>Proteção anti-bot detectada na aba do jogo — tudo pausado até você resolver e recarregar a página. O resto do "Ao vivo" mostrado aqui é o último dado antes disso acontecer, não está mais atualizando.</span></div>`;
+  }
 
   let resourcesHTML = '';
   let troopsHTML = '';

@@ -238,6 +238,21 @@ Feedback imediato depois do v1.10.0, com prints do bug ao vivo:
 
 **Testado no navegador** com dado simulado: recolher/expandir sem nenhuma sobreposição, gráfico mostrando a janela de 7 dias corretamente com só o último preenchido.
 
+## Fase 15 — v1.11.0: regressão da proteção anti-bot causada pelo próprio fix da Coleta
+
+Usuário reportou que "tudo que estava funcionando parou" (recrutamento, comandos, construção) logo depois do v1.10.1 — com prints comparando dado real do jogo (2 Lanceiros/1 Espadachim recrutando) contra o dashboard mostrando dado completamente diferente e congelado (4 Espadachins/9 Lanceiros, os mesmos números de um print de uma mensagem bem anterior, agora com `0:00:00`).
+
+**Causa raiz identificada**: o fix da Fase 14 pro cache da Coleta adicionou `&_=${Date.now()}` na URL pra forçar busca sempre nova — um parâmetro de cache-busting na URL é uma assinatura clássica de raspagem/bot, e provavelmente disparou a própria proteção anti-bot do jogo (`textHasBotCheck` detecta `hcaptcha.com` no HTML da resposta). Uma vez detectado, `botState.active` fica `true` até a página ser recarregada — e como esse estado é **compartilhado entre todos os módulos** (`guard()` é chamado por tudo: live-status, auto-recruit, battle-reports, etc.), a primeira detecção trava a sincronização inteira de uma vez, silenciosamente (só um log de console, nenhum aviso na tela) — exatamente o padrão relatado: tudo parou junto, sem nenhuma pista visível do motivo.
+
+Duas correções:
+
+1. **Removida a causa**: `getScavengeStatus` volta a usar a mesma URL de sempre, sem parâmetro extra — o cache agora é evitado com `cache: 'no-store'` do próprio `fetch()` (nova opção `{ noStore: true }` em `getPage`), uma diretiva HTTP padrão que não muda o que o servidor vê, ao contrário de alterar a URL a cada chamada.
+2. **Aviso visível quando a proteção anti-bot dispara** (pra nunca mais passar despercebido por muito tempo): o painel "Status ao Vivo" no jogo mostra "⚠️ proteção anti-bot detectada — recarregue a página" assim que `botState.active` fica verdadeiro, e grava isso em `storage:'accounts'.botCheckActive` pro dashboard mostrar o mesmo aviso (banner vermelho no lugar do "Ao vivo" normal). Um ciclo bem-sucedido depois disso limpa a flag sozinho.
+
+**UNVERIFIED se o parâmetro de URL foi mesmo a causa da proteção anti-bot** — é a explicação mais coerente com a linha do tempo (quebrou logo depois desse fix específico) e com o mecanismo de detecção existente, mas não há como confirmar sem reproduzir ao vivo. De qualquer forma, os dois fixes (tirar o padrão suspeito da URL + avisar visivelmente da próxima vez) são corretos independente da causa exata.
+
+**Lição pro processo**: a "correção" da Fase 14 pro cache nunca foi testada contra o jogo real antes de ir pro ar — só testei a lógica isoladamente. Ban-risk / anti-bot é uma categoria de mudança que merece mais cautela que bugs de exibição comuns.
+
 ## Fases futuras (ainda não implementadas)
 
 - Auto Defesa: ainda no formato antigo (detecta "ataque" como texto solto na página — falso-positivo praticamente garantido). Candidato a reescrever com o mesmo parser de `info_command` do live-status, uma vez confirmado.

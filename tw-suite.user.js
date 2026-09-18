@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.10.1
+// @version      1.11.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -810,8 +810,14 @@
   }
 
   // ---------- HTTP ----------
-  async function getPage(url) {
-    const res = await fetch(url, { credentials: 'same-origin' });
+  async function getPage(url, { noStore = false } = {}) {
+    // noStore usa a diretiva HTTP padrão do navegador (Cache-Control), não
+    // um parâmetro inventado na URL — um `?_=timestamp` muda a URL de
+    // verdade a cada chamada, o que é uma assinatura clássica de raspagem
+    // e pode ter disparado a própria proteção anti-bot do jogo (ver
+    // registro de verificação, Fase 15). `cache: 'no-store'` só instrui o
+    // navegador a não usar cache local, sem alterar o que o servidor vê.
+    const res = await fetch(url, { credentials: 'same-origin', cache: noStore ? 'no-store' : undefined });
     const text = await res.text();
     if (textHasBotCheck(text)) {
       await flagBotCheck();
@@ -1443,13 +1449,15 @@
 
   async function getScavengeStatus(vid) {
     try {
-      // `_` cache-busting: essa URL é buscada de novo a cada ciclo do
-      // live-status pedindo exatamente o mesmo endereço — sem isso o
-      // navegador pode devolver uma resposta em cache em vez de ir no
-      // servidor, fazendo o status de coleta parecer "travado" mesmo com
-      // uma coleta de verdade em andamento (relatado pelo usuário depois
-      // de usar em conta real).
-      const { text } = await getPage(`/game.php?village=${vid}&screen=place&mode=scavenge&_=${Date.now()}`);
+      // Essa URL é buscada de novo a cada ciclo do live-status pedindo
+      // exatamente o mesmo endereço — sem pedir "não cacheia" pro
+      // navegador, ele pode devolver uma resposta antiga em vez de ir no
+      // servidor. Usa `cache: 'no-store'` (diretiva HTTP padrão) em vez de
+      // um parâmetro inventado na URL — essa segunda abordagem foi tentada
+      // antes e suspeita-se que tenha disparado a proteção anti-bot do
+      // jogo por parecer um padrão de raspagem (ver verification-log,
+      // Fase 15).
+      const { text } = await getPage(`/game.php?village=${vid}&screen=place&mode=scavenge`, { noStore: true });
       const data = parseScavengeVillageData(text);
       if (!data || !data.options) return null;
       return Object.entries(data.options).map(([id, o]) => {
@@ -1697,8 +1705,34 @@
       // o usuário pediu: fica vivo entre sincronizações, e a sincronização
       // seguinte só corrige o valor pro real, não reinicia a contagem.
       let lastSnap = null;
+      let botCheckReported = false;
 
       function renderTick() {
+        // O guard() do resto do script já pausa tudo sozinho quando detecta
+        // proteção anti-bot — mas antes disso ficava só no console, sem
+        // nenhum aviso visível, então "tudo travou" passava despercebido
+        // por muito tempo. `botState.active` é checado aqui (fora do ciclo
+        // travado por guard()) só pra continuar avisando a cada segundo até
+        // a página ser recarregada, mesmo que a causa já tenha passado.
+        // Também escreve isso uma vez em storage:'accounts' pro dashboard
+        // mostrar o mesmo aviso, já que o loop guardado nunca chega a
+        // sincronizar nada enquanto isso estiver ativo.
+        if (S.botState.active) {
+          ui.setStatus('⚠️ proteção anti-bot detectada — recarregue a página depois de resolver');
+          if (!botCheckReported) {
+            botCheckReported = true;
+            const key = TW.accountKeyFromGame && TW.accountKeyFromGame();
+            if (key) {
+              ctx.storage.get('accounts', {}).then((accounts) => {
+                accounts = accounts || {};
+                accounts[key] = { ...(accounts[key] || {}), botCheckActive: true };
+                return ctx.storage.set('accounts', accounts);
+              });
+            }
+          }
+          return;
+        }
+        botCheckReported = false;
         if (!lastSnap) return;
         const now = S.serverTime.now();
         renderList(buildHost, (lastSnap.buildQueue || []).map((q) =>
@@ -1777,7 +1811,10 @@
         const key = TW.accountKeyFromGame && TW.accountKeyFromGame();
         if (!key) return;
         const accounts = (await ctx.storage.get('accounts', {})) || {};
-        accounts[key] = { ...(accounts[key] || {}), ...snap, lastSeen: Date.now() };
+        // Um ciclo bem-sucedido chegando até aqui prova que guard() passou
+        // — limpa qualquer aviso de proteção anti-bot que tenha ficado de
+        // uma vez anterior (senão o aviso no dashboard nunca some sozinho).
+        accounts[key] = { ...(accounts[key] || {}), ...snap, botCheckActive: false, lastSeen: Date.now() };
         await ctx.storage.set('accounts', accounts);
       }, 15000, 25000);
     },
