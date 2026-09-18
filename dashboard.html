@@ -314,6 +314,14 @@ kbd {
 .livequeue-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; padding: 5px 8px; border-radius: 8px; background: var(--ink-1); }
 .livequeue-row .mono { font-family: var(--mono); color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
 
+.chart-card { margin-top: 14px; }
+.chart-block { margin-top: 12px; }
+.chart-block:first-of-type { margin-top: 0; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; }
+.chart-legend-item { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text-2); }
+.chart-legend-item i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.chart-empty { font-size: 12px; color: var(--text-3); padding: 6px 0; }
+
 .testband {
   display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
   margin-top: 18px; padding: 14px 16px; border-radius: var(--radius);
@@ -1341,6 +1349,19 @@ function ago(ts) {
   return `há ${Math.floor(s / 86400)} d`;
 }
 
+// "H:MM:SS" a partir de ms restantes — mesmo formato que o jogo usa. Alimenta
+// o relógio ao vivo do cartão "Ao vivo": os horários-alvo (etaAtMs/
+// arrivesAtMs/returnAtMs) vêm prontos da sincronização (a cada ~20s), e essa
+// função só recalcula o texto a cada tick de 1s, sem precisar sincronizar de
+// novo — a sincronização seguinte só corrige o valor, não reinicia nada.
+function fmtCountdown(ms) {
+  const total = Math.max(0, Math.floor((ms || 0) / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
 function worldParts(world) {
   const m = String(world).match(/^([a-z]+?)(s|p|c)?(\d+)$/i);
   if (!m) return { prefix: world.slice(0, 3), num: '' };
@@ -1504,6 +1525,7 @@ function renderMain() {
       </div>
       <div class="stats" id="heroStats">${statsHTML(key)}</div>
       <div id="liveBox">${liveHTML(key)}</div>
+      <div id="chartBox">${chartHTML(key)}</div>
       <div class="testband ${ts === 'false' ? 'live' : ''}" id="testband">${testbandHTML(ts)}</div>
     </section>
     ${groups}
@@ -1553,18 +1575,27 @@ function liveHTML(key) {
     if (!s.incomingAttacks && !s.outgoingAttacks && s.incoming !== undefined) tags += '<span class="tag tag-live">sem comandos ativos</span>';
   }
 
+  const now = Date.now();
   const queueBlock = (title, iconName, items, render) => items ? `
       <div class="livesub">${icon(iconName, 'sm')}${title}</div>
       <div class="livequeue">${items.length ? items.map(render).join('') : '<span class="note">nada agora</span>'}</div>` : '';
 
   const buildHTML = queueBlock('Construindo', 'hammer', s.buildQueue,
-    (q) => `<div class="livequeue-row"><span>${esc(q.name)}${q.level ? ` nv.${q.level}` : ''}</span><span class="mono">${esc(q.remaining || q.etaText || '')}</span></div>`);
+    (q) => `<div class="livequeue-row"><span>${esc(q.name)}${q.level ? ` nv.${q.level}` : ''}</span><span class="mono">${esc(q.etaAtMs ? fmtCountdown(q.etaAtMs - now) : (q.remaining || q.etaText || ''))}</span></div>`);
   const trainHTML = queueBlock('Recrutando', 'swords', s.trainQueue,
-    (t) => `<div class="livequeue-row"><span>${esc(t.building)}: ${esc(t.name)}</span><span class="mono">${esc(t.remaining || '')}</span></div>`);
+    (t) => `<div class="livequeue-row"><span>${esc(t.building)}: ${esc(t.name)}</span><span class="mono">${esc(t.etaAtMs ? fmtCountdown(t.etaAtMs - now) : (t.remaining || ''))}</span></div>`);
+  const outgoingHTML = queueBlock('Comandos enviados', 'swords', s.outgoing,
+    (c) => {
+      const arrived = c.arrivesAtMs <= now;
+      const returnTxt = !c.returnAtMs ? '' : c.returnAtMs <= now ? ' · de volta' : ` · volta ~${fmtCountdown(c.returnAtMs - now)}`;
+      return `<div class="livequeue-row"><span>${c.kind === 'attack' ? '⚔' : '🛡'} ${esc(c.label || '?')}</span><span class="mono">${esc(arrived ? 'chegou' : fmtCountdown(c.arrivesAtMs - now))}${esc(returnTxt)}</span></div>`;
+    });
+  const incomingHTML = queueBlock('Chegando', 'shield', (s.incoming || []).filter((c) => c.arrivesAtMs > now),
+    (c) => `<div class="livequeue-row"><span>⚠ ${esc(c.label || 'comando')}</span><span class="mono">${esc(fmtCountdown(c.arrivesAtMs - now))}</span></div>`);
   const battleHTML = queueBlock('Relatórios de ataque', 'basket', s.battleLog,
     (b) => {
       const resIcon = b.resultIcon === 'green' ? '✅' : b.resultIcon === 'yellow' ? '⚠️' : '❔';
-      const lootTxt = b.lootTotal ? `saque ${fmt(b.lootTotal)}` : '';
+      const lootTxt = b.loot ? `🪵${fmt(b.loot.wood || 0)} 🧱${fmt(b.loot.stone || 0)} ⛏${fmt(b.loot.iron || 0)}` : '';
       const lossTxt = b.lostAtt ? `perdi ${fmt(b.lostAtt)}` : '';
       const detail = [lootTxt, lossTxt].filter(Boolean).join(' · ');
       return `<div class="livequeue-row"><span>${resIcon} ${esc(b.target || b.title || '?')}</span><span class="mono">${esc(detail)}</span></div>`;
@@ -1577,7 +1608,111 @@ function liveHTML(key) {
         ${tags}
         <span class="note" style="margin-left:auto">atualizado ${esc(ago(s.at || s.buildQueueAt || s.lastSeen))}</span>
       </div>
-      ${resourcesHTML}${troopsHTML}${buildHTML}${trainHTML}${battleHTML}
+      ${resourcesHTML}${troopsHTML}${buildHTML}${trainHTML}${outgoingHTML}${incomingHTML}${battleHTML}
+    </div>`;
+}
+
+// ------------------------------------------------------------------
+// Gráfico de histórico (saque, vitórias/derrotas, perdas) — dados vêm já
+// agregados por dia do script (battle-reports módulo, tw-suite.user.js),
+// guardados em s.battleDaily = { 'AAAA-MM-DD': {wins,losses,lootWood,...} }.
+// Renderiza como barras SVG simples, sem biblioteca — cada barra tem um
+// <title> nativo (tooltip ao passar o mouse) como rótulo seletivo. Não faz
+// parte do relógio ao vivo (#liveBox, que redesenha a cada 1s): fica num
+// cartão próprio, atualizado só na sincronização normal (~20s) ou troca de
+// conta, pra não perder um hover em andamento nem piscar toda hora.
+// ------------------------------------------------------------------
+function buildChartSvg(days, series, { width = 280, height = 92, mode = 'group', gap = 2 } = {}) {
+  const groupW = width / Math.max(1, days.length);
+  const maxVal = Math.max(1, ...days.map((d) => mode === 'stack'
+    ? series.reduce((sum, s) => sum + (d[s.key] || 0), 0)
+    : Math.max(...series.map((s) => d[s.key] || 0))));
+  const padBottom = 13;
+  const plotH = height - padBottom;
+  const barW = mode === 'stack' ? Math.max(2, groupW - gap * 2) : Math.max(2, (groupW - gap * (series.length + 1)) / series.length);
+
+  let bars = '';
+  days.forEach((d, i) => {
+    const x0 = i * groupW;
+    if (mode === 'stack') {
+      let yCursor = plotH;
+      series.forEach((s) => {
+        const v = d[s.key] || 0;
+        if (!v) return;
+        const h = (v / maxVal) * plotH;
+        const y = yCursor - h;
+        bars += `<rect x="${(x0 + gap).toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${s.color}"><title>${esc(d.label)} · ${esc(s.label)}: ${fmt(v)}</title></rect>`;
+        yCursor -= h;
+      });
+    } else {
+      series.forEach((s, si) => {
+        const v = d[s.key] || 0;
+        const h = (v / maxVal) * plotH;
+        const x = x0 + gap + si * (barW + gap);
+        const y = plotH - h;
+        bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="2" fill="${s.color}"><title>${esc(d.label)} · ${esc(s.label)}: ${fmt(v)}</title></rect>`;
+      });
+    }
+  });
+
+  // Rótulo de dia seletivo (não um por barra, viraria poluição visual) —
+  // com poucos dias mostra todos, com mais de 7 mostra só a cada ~3 + o
+  // último, sempre visível.
+  const showEvery = days.length > 7 ? 3 : 1;
+  const dayLabels = days.map((d, i) => {
+    if (i % showEvery !== 0 && i !== days.length - 1) return '';
+    const x = i * groupW + groupW / 2;
+    return `<text x="${x.toFixed(1)}" y="${height - 2}" font-size="7" fill="var(--text-3)" text-anchor="middle">${esc(d.label)}</text>`;
+  }).join('');
+
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="none" style="overflow:visible;display:block">${bars}${dayLabels}</svg>`;
+}
+
+function chartLegendHTML(series) {
+  return `<div class="chart-legend">${series.map((s) => `<span class="chart-legend-item"><i style="background:${s.color}"></i>${esc(s.label)}</span>`).join('')}</div>`;
+}
+
+function chartHTML(key) {
+  const s = state.accounts[key];
+  const daily = s && s.battleDaily;
+  const dayKeys = daily ? Object.keys(daily).sort() : [];
+  if (!dayKeys.length) {
+    return `<div class="livecard chart-card"><div class="livecard-head"><b>${icon('layers', 'sm')}Histórico</b></div><div class="chart-empty">Aparece aqui depois do primeiro relatório de ataque processado pelo script.</div></div>`;
+  }
+  const days = dayKeys.map((k) => {
+    const [, m, d] = k.split('-');
+    return { ...daily[k], label: `${d}/${m}` };
+  });
+
+  const lootSeries = [
+    { key: 'lootWood', label: 'Madeira', color: '#3987e5' },
+    { key: 'lootStone', label: 'Argila', color: '#d95926' },
+    { key: 'lootIron', label: 'Ferro', color: '#199e70' },
+  ];
+  const resultSeries = [
+    { key: 'wins', label: 'Vitórias', color: 'var(--jade)' },
+    { key: 'losses', label: 'Derrotas', color: 'var(--rose)' },
+  ];
+  const lossSeries = [
+    { key: 'myLosses', label: 'Minhas perdas', color: 'var(--rose)' },
+    { key: 'enemyLosses', label: 'Perdas do inimigo', color: 'var(--jade)' },
+  ];
+
+  const block = (title, series, mode) => `
+    <div class="chart-block">
+      <div class="livesub">${esc(title)}</div>
+      ${chartLegendHTML(series)}
+      ${buildChartSvg(days, series, { mode })}
+    </div>`;
+
+  return `
+    <div class="livecard chart-card">
+      <div class="livecard-head">
+        <b>${icon('layers', 'sm')}Histórico (${days.length} dia${days.length === 1 ? '' : 's'})</b>
+      </div>
+      ${block('Saque por dia', lootSeries, 'stack')}
+      ${block('Ataques: vitórias x derrotas', resultSeries, 'group')}
+      ${block('Perdas de tropas', lossSeries, 'group')}
     </div>`;
 }
 
@@ -1669,18 +1804,31 @@ function stepsToQueue(steps) {
 
 function queueEditorHTML(m, cfg) {
   const steps = parseQueueSteps(cfg.settings.queue);
-  const rows = steps.map((s, i) => `
+  // Esconde passos cujo nível já foi ultrapassado de verdade na aldeia —
+  // antes a lista mostrava "Bosque → nv.1" pra sempre, mesmo com o Bosque
+  // já no nível 10, porque é só o plano configurado, sem comparar contra o
+  // nível atual. `buildingLevels` vem do live-status (game_data.buildings,
+  // já carregado em toda página, sem custo de requisição extra). O passo
+  // continua existindo no texto salvo (settings.queue) — só não aparece
+  // nesta lista enquanto já estiver satisfeito.
+  const levels = (state.accounts[state.selected] && state.accounts[state.selected].buildingLevels) || null;
+  const isDone = (s) => levels && levels[s.building] != null && levels[s.building] >= s.level;
+  const visible = steps.map((s, i) => ({ s, i })).filter(({ s }) => !isDone(s));
+  const doneCount = steps.length - visible.length;
+  const rows = visible.map(({ s, i }, pos) => `
     <div class="queue-row">
-      <span class="queue-badge">${i + 1}</span>
+      <span class="queue-badge">${pos + 1}</span>
       <span class="queue-label">${esc(BUILDING_LABELS[s.building] || s.building)} → nv.${s.level}</span>
-      <button class="icon-btn" style="height:26px;padding:0 6px" data-queue-up="${m.id}:${i}" type="button" title="Subir prioridade" ${i === 0 ? 'disabled' : ''}>${icon('up', 'sm')}</button>
-      <button class="icon-btn" style="height:26px;padding:0 6px" data-queue-down="${m.id}:${i}" type="button" title="Descer prioridade" ${i === steps.length - 1 ? 'disabled' : ''}>${icon('down', 'sm')}</button>
+      <button class="icon-btn" style="height:26px;padding:0 6px" data-queue-up="${m.id}:${i}" type="button" title="Subir prioridade" ${pos === 0 ? 'disabled' : ''}>${icon('up', 'sm')}</button>
+      <button class="icon-btn" style="height:26px;padding:0 6px" data-queue-down="${m.id}:${i}" type="button" title="Descer prioridade" ${pos === visible.length - 1 ? 'disabled' : ''}>${icon('down', 'sm')}</button>
       <button class="icon-btn" style="height:26px;padding:0 6px" data-queue-del="${m.id}:${i}" type="button" title="Remover">${icon('trash', 'sm')}</button>
     </div>`).join('');
+  const doneNote = doneCount ? `<p class="note" style="margin:4px 0 0">${doneCount} passo(s) já concluído(s) (nível atual já ultrapassou), ocultos daqui.</p>` : '';
   const options = Object.entries(BUILDING_LABELS).map(([value, label]) => `<option value="${value}">${esc(label)}</option>`).join('');
   return `
     <div class="tpl-box">
       <div class="queue-list">${rows || '<p class="note" style="margin:6px 0">Fila vazia.</p>'}</div>
+      ${doneNote}
       <div class="queue-add">
         <select class="field" data-queue-add-building="${m.id}">${options}</select>
         <input type="number" min="1" max="30" value="1" class="field" data-queue-add-level="${m.id}">
@@ -1779,6 +1927,8 @@ function refreshChrome() {
   if (stats) stats.innerHTML = statsHTML(key);
   const live = $('#liveBox');
   if (live) live.innerHTML = liveHTML(key);
+  const chart = $('#chartBox');
+  if (chart) chart.innerHTML = chartHTML(key);
   const band = $('#testband');
   if (band) {
     const ts = testState(p);
@@ -2931,6 +3081,14 @@ setInterval(async () => {
     refreshChrome();
   } catch { /* falha temporária — tenta de novo no próximo ciclo */ }
 }, 20000);
+// Relógio ao vivo do cartão "Ao vivo": só recalcula os textos de contagem
+// regressiva a partir dos horários absolutos já sincronizados (etaAtMs/
+// arrivesAtMs/returnAtMs) — não busca dado novo, por isso pode rodar a cada
+// 1s sem custo. A sincronização de 20s acima é quem traz o dado real.
+setInterval(() => {
+  const live = $('#liveBox');
+  if (live && state.selected) live.innerHTML = liveHTML(state.selected);
+}, 1000);
 [0, 500, 1500, 4000].forEach((ms) => setTimeout(() => { if (!bridge.connected) connectBridge(); }, ms));
 })();
 </script>

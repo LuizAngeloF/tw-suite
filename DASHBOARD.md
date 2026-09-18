@@ -55,7 +55,19 @@ Depois que o script roda pelo menos uma vez numa conta (até ~90s após abrir o 
 
 ## Relatórios de ataque (v1.7.0)
 
-O mesmo cartão **Ao vivo** agora também mostra os últimos ataques que você mandou — vitória/derrota, aldeia alvo, quanto saqueou e quantas tropas perdeu, cada um assim que o relatório chega. Não precisa ligar nenhum módulo pra isso funcionar, é automático como o resto do "Ao vivo". Cobre só relatórios de **ataque** — apoio, comércio e outros tipos de relatório não aparecem aqui.
+O mesmo cartão **Ao vivo** agora também mostra os últimos ataques que você mandou — vitória/derrota, aldeia alvo, quanto saqueou (por recurso: madeira/argila/ferro) e quantas tropas perdeu, cada um assim que o relatório chega. Não precisa ligar nenhum módulo pra isso funcionar, é automático como o resto do "Ao vivo". Cobre só relatórios de **ataque** — apoio, comércio e outros tipos de relatório não aparecem aqui.
+
+## Relógio ao vivo (v1.8.0)
+
+Construção, recrutamento e comandos a caminho agora contam o tempo em tempo real, segundo a segundo — não fica mais parado esperando a próxima sincronização (~20s). Comandos enviados também mostram uma estimativa de "ida + volta" (aparece com `~` na frente, é aproximado — o jogo não informa a hora exata de envio, só a de chegada).
+
+## Gráfico de histórico (v1.8.0)
+
+Novo cartão **Histórico**, logo abaixo do "Ao vivo": três gráficos com os últimos 14 dias — saque por dia (madeira/argila/ferro), vitórias x derrotas, e perdas de tropas (suas x do inimigo). Passe o mouse numa barra pra ver o valor exato. Some sozinho conforme os relatórios de ataque chegam, sem precisar configurar nada.
+
+## Fila de construção sem passo já concluído (v1.8.0)
+
+O editor de fila do módulo **Construção** agora esconde passos cujo nível você já ultrapassou (ex.: "Bosque → nv.1" some se o Bosque já estiver no nível 10) — antes mostrava o plano inteiro, mesmo com passos antigos já satisfeitos. Uma notinha avisa quantos passos estão ocultos.
 
 ## Se não sincronizar
 

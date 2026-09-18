@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.7.0
+// @version      1.8.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1320,6 +1320,7 @@
       const labelEl = tr.querySelector('.quickedit-label');
       const hintEl = tr.querySelector('.command_hover_details');
       out.push({
+        id: hintEl ? hintEl.getAttribute('data-command-id') : null,
         etaMs: Math.max(0, arrivesAtMs - now),
         arrivesAtMs,
         label: labelEl ? labelEl.textContent.replace(/\s+/g, ' ').trim() : null,
@@ -1423,6 +1424,16 @@
     return [...barracks, ...stable, ...garage];
   }
 
+  // "0:11:31" / "0:04:15" → ms. Usado pra transformar o texto de contagem
+  // regressiva (que já vem formatado do jogo) num horário-alvo absoluto, pra
+  // dar pra manter um relógio rodando localmente entre sincronizações, em
+  // vez do número só "congelar" até o próximo ciclo.
+  function parseCountdownToMs(text) {
+    const m = String(text || '').match(/^(\d+):(\d{2}):(\d{2})$/);
+    if (!m) return null;
+    return ((Number(m[1]) * 60 + Number(m[2])) * 60 + Number(m[3])) * 1000;
+  }
+
   async function buildLiveSnapshot() {
     const g = gd();
     if (!g || !g.village) return null;
@@ -1434,6 +1445,15 @@
       getPage(`/game.php?village=${vid}&screen=main`).then((p) => readBuildQueue(p.doc)).catch(() => null),
       getTrainQueue(vid).catch(() => null),
     ]);
+    const now = TW.serverTime.now();
+    const withEta = (list) => list ? list.map((item) => {
+      const ms = parseCountdownToMs(item.remaining);
+      return ms == null ? item : { ...item, etaAtMs: now + ms };
+    }) : list;
+    const buildingLevels = {};
+    if (g.village.buildings) {
+      for (const [b, lvl] of Object.entries(g.village.buildings)) buildingLevels[b] = Number(lvl) || 0;
+    }
     return {
       at: Date.now(),
       village: { id: vid, name: g.village.name, x: g.village.x, y: g.village.y },
@@ -1441,13 +1461,14 @@
       points: g.player ? Number(g.player.points) : null,
       villages: g.player ? Number(g.player.villages) : null,
       troops,
+      buildingLevels,
       incoming: incoming ? incoming.slice(0, 5) : null,
       incomingAttacks: incoming ? incoming.filter((c) => c.kind === 'attack').length : null,
       outgoing: outgoing ? outgoing.slice(0, 5) : null,
       outgoingAttacks: outgoing ? outgoing.filter((c) => c.kind === 'attack').length : null,
-      buildQueue,
+      buildQueue: withEta(buildQueue),
       buildQueueAt: buildQueue ? Date.now() : undefined,
-      trainQueue,
+      trainQueue: withEta(trainQueue),
       trainQueueAt: trainQueue ? Date.now() : undefined,
     };
   }
@@ -1586,6 +1607,18 @@
     for (const line of items) host.appendChild(S.h('div', { class: 'tws-row', text: line }));
   }
 
+  // Formata ms restantes como "H:MM:SS", igual ao texto que o próprio jogo
+  // mostra — usado pra manter a contagem regressiva rodando localmente entre
+  // sincronizações (a cada ~15-25s), em vez do número ficar parado até o
+  // próximo ciclo buscar a página de novo.
+  function fmtCountdown(ms) {
+    const total = Math.max(0, Math.floor((ms || 0) / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
   TW.registerModule({
     id: 'live-status',
     name: 'Status ao Vivo (interno)',
@@ -1607,6 +1640,39 @@
         S.h('div', { style: { fontWeight: 'bold', fontSize: '10px', marginTop: '4px' }, text: 'Comandos' }), cmdHost,
       );
 
+      // `lastSnap` é redesenhado a cada segundo (renderTick), sem refazer
+      // nenhuma requisição — só recalcula os "faltam Xh" a partir dos
+      // horários absolutos (etaAtMs/arrivesAtMs) já capturados no último
+      // ciclo real (S.loop, a cada ~15-25s). É esse o "relógio próprio" que
+      // o usuário pediu: fica vivo entre sincronizações, e a sincronização
+      // seguinte só corrige o valor pro real, não reinicia a contagem.
+      let lastSnap = null;
+
+      function renderTick() {
+        if (!lastSnap) return;
+        const now = S.serverTime.now();
+        renderList(buildHost, (lastSnap.buildQueue || []).map((q) =>
+          `${q.name}${q.level ? ` nv.${q.level}` : ''}${q.etaAtMs ? ` · ${fmtCountdown(q.etaAtMs - now)}` : q.remaining ? ` · ${q.remaining}` : ''}`
+        ), 'Nada na fila agora.');
+        renderList(trainHost, (lastSnap.trainQueue || []).map((t) =>
+          `${t.building}: ${t.name}${t.etaAtMs ? ` · ${fmtCountdown(t.etaAtMs - now)}` : t.remaining ? ` · ${t.remaining}` : ''}`
+        ), 'Nada treinando agora.');
+
+        const cmdLines = [];
+        for (const c of (lastSnap.outgoing || [])) {
+          const arrived = c.arrivesAtMs <= now;
+          const returnTxt = !c.returnAtMs ? ''
+            : c.returnAtMs <= now ? ' · de volta' : ` · volta em ~${fmtCountdown(c.returnAtMs - now)}`;
+          cmdLines.push(`${c.kind === 'attack' ? '⚔' : '🛡'} ${c.label || '?'} — ${arrived ? 'chegou' : `chega em ${fmtCountdown(c.arrivesAtMs - now)}`}${returnTxt}`);
+        }
+        for (const c of (lastSnap.incoming || [])) {
+          if (c.arrivesAtMs <= now) continue;
+          cmdLines.push(`⚠ ${c.label || 'comando'} chegando em ${fmtCountdown(c.arrivesAtMs - now)}`);
+        }
+        renderList(cmdHost, cmdLines, 'Nenhum comando ativo.');
+      }
+      setInterval(renderTick, 1000);
+
       // Antes só mostrava fila de construção/recrutamento quando o módulo
       // de automação correspondente estava ligado (era ele quem lia e
       // reportava). Status ao Vivo roda sempre — agora é a única fonte
@@ -1617,15 +1683,35 @@
         const snap = await S.buildLiveSnapshot();
         if (!snap) return;
 
+        // Estimativa de ida+volta dos comandos enviados: a tela só dá a
+        // hora de CHEGADA, nunca quando foi enviado. Aproximamos "enviado"
+        // pela primeira vez que este ciclo viu aquele comando (atraso real
+        // de no máximo ~25s, pequeno perto do tempo de viagem de um
+        // ataque). Ida = volta em condições normais, então
+        // volta ≈ 2×chegada − primeira-vez-visto. Só fica disponível a
+        // partir do 2º ciclo em que o mesmo comando aparece — por isso
+        // "~" no texto exibido, é estimativa, não a hora exata do jogo.
+        if (snap.outgoing && snap.outgoing.length) {
+          const firstSeen = (await ctx.storage.get('live-status:cmdFirstSeen', {})) || {};
+          const now = Date.now();
+          let changed = false;
+          for (const cmd of snap.outgoing) {
+            if (!cmd.id) continue;
+            if (!firstSeen[cmd.id]) { firstSeen[cmd.id] = now; changed = true; }
+            else cmd.returnAtMs = 2 * cmd.arrivesAtMs - firstSeen[cmd.id];
+          }
+          const stillHere = new Set(snap.outgoing.map((c) => c.id).filter(Boolean));
+          for (const id of Object.keys(firstSeen)) {
+            if (!stillHere.has(id)) { delete firstSeen[id]; changed = true; }
+          }
+          if (changed) await ctx.storage.set('live-status:cmdFirstSeen', firstSeen);
+        }
+
         resHost.textContent = snap.resources
           ? `${S.RES_LABELS.wood} ${snap.resources.wood} · ${S.RES_LABELS.stone} ${snap.resources.stone} · ${S.RES_LABELS.iron} ${snap.resources.iron} (máx ${snap.resources.storageMax})`
           : '';
-        renderList(buildHost, (snap.buildQueue || []).map((q) => `${q.name}${q.level ? ` nv.${q.level}` : ''}${q.remaining ? ` · ${q.remaining}` : ''}`), 'Nada na fila agora.');
-        renderList(trainHost, (snap.trainQueue || []).map((t) => `${t.building}: ${t.name}${t.remaining ? ` · ${t.remaining}` : ''}`), 'Nada treinando agora.');
-        const cmdLines = [];
-        if (snap.outgoingAttacks) cmdLines.push(`⚔ ${snap.outgoingAttacks} ataque(s) a caminho (enviados)`);
-        if (snap.incomingAttacks) cmdLines.push(`⚠ ${snap.incomingAttacks} ataque(s) chegando`);
-        renderList(cmdHost, cmdLines, 'Nenhum comando ativo.');
+        lastSnap = snap;
+        renderTick();
         ui.setStatus(`atualizado ${new Date().toLocaleTimeString()}`);
 
         const key = TW.accountKeyFromGame && TW.accountKeyFromGame();
@@ -1657,6 +1743,34 @@
   const MODULE_ID = 'battle-reports';
   const LOG_LIMIT = 50;
   const SEEN_LIMIT = 300; // teto pra lista de ids já processados não crescer pra sempre
+  const DAILY_LIMIT = 14; // dias de agregação guardados, pro gráfico do dashboard
+
+  // Chave local (não do servidor) — precisão de dia é suficiente pro
+  // gráfico, e evita parsear a data em português do relatório (frágil,
+  // depende de locale) só pra bucketizar por dia.
+  function dayKey(ms) {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function addToDaily(daily, summary) {
+    const key = dayKey(summary.at);
+    const bucket = daily[key] || { wins: 0, losses: 0, other: 0, lootWood: 0, lootStone: 0, lootIron: 0, myLosses: 0, enemyLosses: 0, attacks: 0 };
+    bucket.attacks += 1;
+    if (summary.resultIcon === 'green') bucket.wins += 1;
+    else if (summary.resultIcon === 'yellow') bucket.losses += 1;
+    else bucket.other += 1;
+    if (summary.loot) {
+      bucket.lootWood += summary.loot.wood || 0;
+      bucket.lootStone += summary.loot.stone || 0;
+      bucket.lootIron += summary.loot.iron || 0;
+    }
+    bucket.myLosses += summary.lostAtt || 0;
+    bucket.enemyLosses += summary.lostDef || 0;
+    daily[key] = bucket;
+    const keys = Object.keys(daily).sort();
+    while (keys.length > DAILY_LIMIT) delete daily[keys.shift()];
+  }
 
   function summarize(row, detail) {
     const lostAtt = detail ? Object.values(detail.attackerLosses || {}).reduce((a, b) => a + b, 0) : null;
@@ -1682,7 +1796,7 @@
     }
     for (const b of log.slice(0, 8)) {
       const icon = b.resultIcon === 'green' ? '✅' : b.resultIcon === 'yellow' ? '⚠️' : '❔';
-      const lootTxt = b.lootTotal ? ` · saque ${b.lootTotal}` : '';
+      const lootTxt = b.loot ? ` · 🪵${b.loot.wood || 0} 🧱${b.loot.stone || 0} ⛏${b.loot.iron || 0}` : '';
       const lossTxt = b.lostAtt ? ` · perdi ${b.lostAtt}` : '';
       host.appendChild(S.h('div', { class: 'tws-row', text: `${icon} ${b.target || b.title || '?'}${lootTxt}${lossTxt}` }));
     }
@@ -1712,14 +1826,18 @@
         const newOnes = rows.filter((r) => r.resultIcon && !seenSet.has(r.id));
 
         let log = (await ctx.storage.get(`${MODULE_ID}:log`, [])) || [];
+        let daily = (await ctx.storage.get(`${MODULE_ID}:daily`, {})) || {};
         for (const row of newOnes) {
           const detail = await S.getAttackReportDetail(vid, row.id);
-          log.unshift(summarize(row, detail));
+          const summary = summarize(row, detail);
+          log.unshift(summary);
+          addToDaily(daily, summary);
           seenSet.add(row.id);
         }
         if (newOnes.length) {
           log = log.slice(0, LOG_LIMIT);
           await ctx.storage.set(`${MODULE_ID}:log`, log);
+          await ctx.storage.set(`${MODULE_ID}:daily`, daily);
           await ctx.storage.set(`${MODULE_ID}:seen`, [...seenSet].slice(-SEEN_LIMIT));
         }
 
@@ -1729,7 +1847,7 @@
         const key = TW.accountKeyFromGame && TW.accountKeyFromGame();
         if (!key) return;
         const accounts = (await ctx.storage.get('accounts', {})) || {};
-        accounts[key] = { ...(accounts[key] || {}), battleLog: log.slice(0, 10), battleLogAt: Date.now() };
+        accounts[key] = { ...(accounts[key] || {}), battleLog: log.slice(0, 10), battleDaily: daily, battleLogAt: Date.now() };
         await ctx.storage.set('accounts', accounts);
       }, 90000, 150000);
     },
