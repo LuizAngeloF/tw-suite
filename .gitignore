@@ -1,1 +1,6 @@
 .claude/
+
+# Multi Contas — vault, senha mestra, perfis de navegador: só existem localmente,
+# nunca vão pro repositório (nem que uma nova conta seja adicionada por engano).
+multi-contas/node_modules/
+multi-contas/data/

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.11.0
+// @version      1.12.0
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -778,8 +778,16 @@
   }
 
   // ---------- captcha / proteção anti-bot ----------
-  const botState = { active: false };
+  // botState.active nunca era limpo automaticamente — uma vez detectado
+  // (em qualquer módulo, mesmo por um falso positivo), TODOS os loops
+  // do script morriam pra sempre (ver bug do loop() abaixo) até
+  // recarregar a página manualmente. Agora expira sozinho depois de
+  // BOT_COOLDOWN_MS: os loops voltam a tentar, e a própria tentativa
+  // real (fetch) confirma se ainda está bloqueado ou não — se ainda
+  // estiver, re-flag na hora; se não, segue normal, sem reload.
+  const botState = { active: false, since: 0 };
   const BOT_SELECTORS = '#bot_check, #botprotection_quest, .bot-protection-row, iframe[src*="hcaptcha"], iframe[src*="recaptcha"]';
+  const BOT_COOLDOWN_MS = 120000;
 
   function pageHasBotCheck(root = document) {
     return !!root.querySelector(BOT_SELECTORS);
@@ -790,18 +798,22 @@
   }
 
   async function flagBotCheck() {
+    botState.since = Date.now();
     if (botState.active) return;
     botState.active = true;
-    TW.log.warn('Proteção anti-bot detectada — automações pausadas até recarregar a página depois de resolver.');
+    TW.log.warn('Proteção anti-bot detectada — automações pausadas por alguns minutos (retoma sozinho, sem precisar recarregar).');
     const last = await TW.storage.get('shared:lastBotNotify', 0);
     if (Date.now() - last > 10 * 60 * 1000) {
       await TW.storage.set('shared:lastBotNotify', Date.now());
-      notify('🛑 Captcha / proteção anti-bot na tela. As automações pararam até você resolver.', { kind: 'captcha' });
+      notify('🛑 Captcha / proteção anti-bot na tela. As automações pausaram e tentam sozinhas de novo em alguns minutos.', { kind: 'captcha' });
     }
   }
 
   async function guard() {
-    if (botState.active) return false;
+    if (botState.active) {
+      if (Date.now() - botState.since < BOT_COOLDOWN_MS) return false;
+      botState.active = false; // cooldown venceu — tenta de novo; se ainda bloqueado, re-flag na hora
+    }
     if (pageHasBotCheck()) {
       await flagBotCheck();
       return false;
@@ -1217,16 +1229,22 @@
   }
 
   function loop(name, fn, minMs, maxMs) {
+    // Antes: só reagendava a si mesmo se `!botState.active` — como esse
+    // flag não tinha por que baixar sozinho, um único bot-check (em
+    // QUALQUER módulo) matava o loop pra sempre, silenciosamente, até
+    // recarregar a página. Agora só `stopped` (chamado explicitamente)
+    // encerra o loop; enquanto bloqueado por anti-bot, ele continua
+    // tentando a cada ciclo — guard() decide se roda ou não.
     let stopped = false;
     const run = async () => {
-      if (stopped || botState.active) return;
+      if (stopped) return;
       const delay = jitter(minMs, maxMs);
       try {
         if (await acquireLock(name, delay + 20000) && await guard()) await fn();
       } catch (e) {
         if (!(e instanceof BotCheckError)) TW.log.error(`[${name}] erro no ciclo:`, e);
       }
-      if (!stopped && !botState.active) setTimeout(run, delay);
+      if (!stopped) setTimeout(run, delay);
     };
     setTimeout(run, jitter(1500, 4000));
     return () => { stopped = true; };
@@ -2392,6 +2410,10 @@
       // elegível) e envia sozinho — sem precisar de clique.
       // --------------------------------------------------------
       S.loop(`${MODULE_ID}:${myVillage.id}`, async () => {
+        if (S.botState.active) {
+          statusBox.textContent = '⚠️ proteção anti-bot detectada — pausado, tenta de novo sozinho em alguns minutos';
+          return;
+        }
         const s = await storage.getModuleSettings(MODULE_ID, DEFAULT_SETTINGS);
         const tpl = (s.templates || []).find((t) => t.id === s.activeTemplateId);
         if (!tpl) { statusBox.textContent = 'Sem modelo de tropas ativo — crie um acima.'; return; }

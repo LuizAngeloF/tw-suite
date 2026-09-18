@@ -253,6 +253,25 @@ Duas correções:
 
 **Lição pro processo**: a "correção" da Fase 14 pro cache nunca foi testada contra o jogo real antes de ir pro ar — só testei a lógica isoladamente. Ban-risk / anti-bot é uma categoria de mudança que merece mais cautela que bugs de exibição comuns.
 
+## Fase 16 — v1.12.0: loop morto pra sempre depois de UMA detecção anti-bot (causa real do "preciso recarregar")
+
+Usuário reportou que o Auto Farm envia um ataque e depois só volta a enviar outro depois de recarregar a página — "demora tudo de novo, às vezes nem envia". Print mostrava o painel travado em "Iniciando...".
+
+**Causa raiz — bug estrutural em `S.loop()`, não específico do Auto Farm**: `botState.active` (flag compartilhada de proteção anti-bot, ver Fase 15) nunca era limpa sozinha em lugar nenhum do código depois de setada. E a última linha de `loop()` só reagendava o próprio ciclo com `if (!stopped && !botState.active) setTimeout(run, delay)` — ou seja, bastava UMA detecção (em qualquer módulo, a qualquer momento da sessão, mesmo um falso positivo passageiro) pra aquele loop específico nunca mais se chamar de novo, silenciosamente, pro resto da sessão. A Fase 15 já tinha adicionado um aviso visível quando isso acontece, mas não resolvia o problema em si: mesmo vendo o aviso, só reload resolvia.
+
+Reproduzido isoladamente com um script Node (fora do jogo) copiando a lógica exata de `loop()`/`guard()`: confirmado que, no código antigo, mesmo limpando `botState.active` manualmente de fora, o contador de envios trava no valor de antes da detecção e nunca mais sobe — o loop realmente morre, não só pausa.
+
+Duas correções:
+
+1. **`loop()` agora só para quando mandado explicitamente parar** (`stopped`, chamado pelo botão de desligar o módulo) — a condição `&& !botState.active` foi removida do reagendamento. Enquanto bloqueado por anti-bot, o loop continua rodando no ritmo normal (20-35s no caso do Auto Farm) e `guard()` decide, a cada ciclo, se deixa `fn()` rodar ou não.
+2. **`botState.active` agora expira sozinho** depois de `BOT_COOLDOWN_MS` (2 minutos): `guard()` limpa a flag depois do cooldown e tenta de novo — se ainda estiver bloqueado de verdade (elemento de captcha ainda na tela, ou o próximo fetch real ainda bater na proteção), `flagBotCheck()` é chamado de novo na hora e o cooldown reinicia; se não, segue normal. Resultado: nenhuma detecção anti-bot exige mais reload manual — o pior caso agora é uma pausa de até 2 minutos, sozinha.
+
+O painel do Auto Farm também ganhou o mesmo aviso "⚠️ proteção anti-bot detectada" que o Status ao Vivo já tinha (Fase 15), pra não ficar mostrando mensagem antiga/confusa enquanto pausado.
+
+**Testado**: reprodução isolada em Node (fora do jogo, lógica copiada) confirmando que (a) o código antigo trava envios pra sempre após uma detecção, mesmo com o flag limpo externamente depois; (b) o código novo continua reagendando o ciclo através da detecção e retoma envios sozinho assim que o cooldown vence e o bloqueio (simulado) deixa de existir. `node --check` limpo no arquivo inteiro. **Não testado contra o jogo real** — não há como provocar uma detecção anti-bot real de forma segura só pra testar; a lógica em si (reagendamento incondicional + expiração de cooldown) é simples o bastante pra validar isolada com confiança.
+
+**Nota**: esse mesmo bug afetava TODOS os módulos que usam `S.loop()` (Auto Farm, Auto Recrutamento, Construção automática, Status ao Vivo, Relatórios de batalha, Coleta em massa, etc.) — não só o Auto Farm. O usuário só notou no Auto Farm porque é o que mais depende de ciclos consecutivos pra ser útil (uma onda parada é ataque nenhum saindo), mas qualquer um dos outros também ficaria mudo pra sempre depois da primeira detecção, antes deste fix.
+
 ## Fases futuras (ainda não implementadas)
 
 - Auto Defesa: ainda no formato antigo (detecta "ataque" como texto solto na página — falso-positivo praticamente garantido). Candidato a reescrever com o mesmo parser de `info_command` do live-status, uma vez confirmado.
