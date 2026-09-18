@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TW Suite
 // @namespace    https://github.com/LuizAngeloF/tw-suite
-// @version      1.6.1
+// @version      1.6.2
 // @description  Sistema centralizado de módulos de automação para Tribal Wars (uso privado / grupo fechado)
 // @author       LuizAngeloF
 // @match        https://*.tribalwars.com.br/game.php*
@@ -1530,7 +1530,7 @@
         const accounts = (await ctx.storage.get('accounts', {})) || {};
         accounts[key] = { ...(accounts[key] || {}), ...snap, lastSeen: Date.now() };
         await ctx.storage.set('accounts', accounts);
-      }, 35000, 55000);
+      }, 15000, 25000);
     },
   });
 })();
